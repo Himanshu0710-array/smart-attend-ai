@@ -84,9 +84,18 @@ app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   res.json(users);
 });
 
-app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
+app.post('/api/admin/users', requireAuth, async (req, res) => {
   try {
-    const { name, email, password, role, rollNumber, section, department } = req.body;
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+       return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const { name, email, password, role, rollNumber, section, branch, batch, department } = req.body;
+    
+    if (req.user.role === 'teacher' && role !== 'student') {
+       return res.status(403).json({ error: 'Teachers can only create student accounts' });
+    }
+
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ error: 'Email already exists' });
 
@@ -94,7 +103,7 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
     const uid = `user-${Date.now()}`;
 
     const user = new User({
-      uid, name, email, password: hashedPassword, role, rollNumber, section, department
+      uid, name, email, password: hashedPassword, role, rollNumber, section, branch, batch, department
     });
     await user.save();
     
@@ -337,6 +346,105 @@ app.get('/api/teacher/history/:teacherName', requireAuth, async (req, res) => {
     }
     res.json(history);
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========= REPORTS ROUTE =========
+app.post('/api/teacher/reports', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const { startDate, endDate, branch, batch, section } = req.body;
+    
+    // 1. Find matching students
+    const userQuery = { role: 'student' };
+    if (branch) userQuery.branch = branch;
+    if (batch) userQuery.batch = batch;
+    if (section) userQuery.section = section;
+    const students = await User.find(userQuery);
+    
+    if (students.length === 0) {
+      return res.json([]);
+    }
+
+    const studentUids = students.map(s => s.uid);
+    const studentMap = {};
+    students.forEach(s => {
+      studentMap[s.uid] = {
+        name: s.name,
+        rollNumber: s.rollNumber || 'N/A',
+        branch: s.branch || 'N/A',
+        batch: s.batch || 'N/A',
+        section: s.section || 'N/A',
+        totalClasses: 0,
+        attended: 0
+      };
+    });
+
+    // 2. Find sessions in date range
+    const teacher = await User.findOne({ uid: req.user.uid });
+    const sessionQuery = {};
+    if (req.user.role === 'teacher') {
+      sessionQuery.teacherName = teacher.name;
+    }
+    
+    if (startDate || endDate) {
+      sessionQuery.createdAt = {};
+      if (startDate) sessionQuery.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        sessionQuery.createdAt.$lte = end;
+      }
+    }
+    const sessions = await Session.find(sessionQuery);
+    const sessionIds = sessions.map(s => s.id);
+
+    if (sessionIds.length === 0) {
+      return res.json(Object.values(studentMap));
+    }
+
+    // 3. Find attendance
+    const attendances = await Attendance.find({
+      sessionId: { $in: sessionIds },
+      studentUid: { $in: studentUids }
+    });
+
+    // We must calculate total classes carefully:
+    // A student is part of a batch. If a session was created for their batch, it counts as 1 class.
+    // Wait, session schema has 'section' which maps to the batch. 
+    // Let's aggregate properly.
+    sessions.forEach(session => {
+      // Find students in this session's batch (section field)
+      students.forEach(student => {
+        // Assume session.section is the batch name or classroom ID. In this app, session.section is the batch name.
+        if (student.batch === session.section || student.section === session.section) {
+           studentMap[student.uid].totalClasses++;
+        }
+      });
+    });
+
+    attendances.forEach(record => {
+      if (record.status === 'Present') {
+        studentMap[record.studentUid].attended++;
+      }
+    });
+
+    // Format output
+    const report = Object.values(studentMap).map(s => {
+      const percentage = s.totalClasses === 0 ? 0 : Math.round((s.attended / s.totalClasses) * 100);
+      return {
+        ...s,
+        percentage
+      };
+    });
+
+    res.json(report);
+  } catch (error) {
+    console.error('Reports error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

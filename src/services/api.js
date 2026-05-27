@@ -52,9 +52,11 @@ export const getAttendance = (sessionId) => request(`/attendance/${sessionId}`);
 export const markAttendance = (sessionId, studentUid, distance, isLate) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, distance, isLate }) });
 export const reverifyAttendance = (sessionId, studentUid, isInsideGeofence, distance) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, isInsideGeofence, distance }) });
 
-// History
+// History & Reports
 export const getStudentHistory = (studentUid) => request(`/history/${studentUid}`);
 export const getTeacherHistory = (teacherName) => request(`/teacher/history/${teacherName}`);
+export const getTeacherReports = (filters) => request('/teacher/reports', { method: 'POST', body: JSON.stringify(filters) });
+export const createStudentByTeacher = (studentData) => request('/admin/users', { method: 'POST', body: JSON.stringify({ ...studentData, role: 'student' }) });
 
 // Timetable
 export const getTimetable = () => request('/timetable');

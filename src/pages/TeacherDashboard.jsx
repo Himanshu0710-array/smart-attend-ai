@@ -44,6 +44,16 @@ export default function TeacherDashboard() {
   const [selectedBatch, setSelectedBatch] = useState('');
   const [editingCell, setEditingCell] = useState(null); // { date, slotIndex, data }
 
+  // Reports State
+  const [reportFilters, setReportFilters] = useState({ startDate: '', endDate: '', branch: '', batch: '', section: '' });
+  const [reportData, setReportData] = useState([]);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  // Students State
+  const [showStudentModal, setShowStudentModal] = useState(false);
+  const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
+  const [isCreatingStudent, setIsCreatingStudent] = useState(false);
+
   const teacherName = userData?.name || 'Teacher';
 
   // Load classrooms on mount
@@ -201,6 +211,22 @@ export default function TeacherDashboard() {
     }
   }
 
+  // Handle Add Student
+  const handleCreateStudent = async (e) => {
+    e.preventDefault();
+    setIsCreatingStudent(true);
+    try {
+      await api.createStudentByTeacher(newStudent);
+      alert('Student created successfully!');
+      setShowStudentModal(false);
+      setNewStudent({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
+    } catch (error) {
+      alert(error.error || 'Failed to create student');
+    } finally {
+      setIsCreatingStudent(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -219,16 +245,18 @@ export default function TeacherDashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 bg-slate-100 dark:bg-slate-800/50 p-1 rounded-xl w-full max-w-md">
+      <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-800/50 p-1 rounded-xl w-full max-w-2xl">
         {[
           { id: 'live', label: 'Live Session' },
-          { id: 'history', label: 'History & Reports' },
+          { id: 'history', label: 'History' },
+          { id: 'reports', label: 'Reports' },
           { id: 'timetable', label: 'Time Table' },
+          { id: 'students', label: 'Manage Students' },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+            className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
@@ -397,7 +425,7 @@ export default function TeacherDashboard() {
       )}
 
       {/* =========================================================================
-          TAB: HISTORY & REPORTS
+          TAB: HISTORY
           ========================================================================= */}
       {activeTab === 'history' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -501,13 +529,6 @@ export default function TeacherDashboard() {
       )}
 
       {/* =========================================================================
-          TAB: TIME TABLE (INTERACTIVE GRID)
-          ========================================================================= */}
-      {activeTab === 'timetable' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col h-full">
-          
-          {/* Header & Batch Selector */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <CalendarIcon className="w-6 h-6 text-purple-500" />
               CRT Timetable
@@ -668,6 +689,44 @@ export default function TeacherDashboard() {
                 <Save className="w-4 h-4" /> Save Changes
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Student Modal */}
+      {showStudentModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Register New Student</h2>
+            <form onSubmit={handleCreateStudent} className="space-y-4">
+              <div><input type="text" placeholder="Name" required value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div><input type="email" placeholder="Email" required value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div><input type="password" placeholder="Password" required value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              
+              <div>
+                <select 
+                  value={newStudent.batch} 
+                  onChange={e => setNewStudent({...newStudent, batch: e.target.value})} 
+                  className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                  required
+                >
+                  <option value="" disabled>Select Batch</option>
+                  {classrooms.map(b => (
+                    <option key={b.id} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div><input type="text" placeholder="Branch (e.g. CSE)" required value={newStudent.branch} onChange={e => setNewStudent({...newStudent, branch: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div><input type="text" placeholder="Section (e.g. A)" required value={newStudent.section} onChange={e => setNewStudent({...newStudent, section: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div><input type="text" placeholder="Roll Number" required value={newStudent.rollNumber} onChange={e => setNewStudent({...newStudent, rollNumber: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+
+              <div className="flex justify-end gap-2 mt-6">
+                <button type="button" onClick={() => setShowStudentModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white" disabled={isCreatingStudent}>Cancel</button>
+                <button type="submit" disabled={isCreatingStudent} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                  {isCreatingStudent ? 'Creating...' : 'Create Student'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

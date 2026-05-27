@@ -18,7 +18,7 @@ export default function AdminDashboard() {
 
   // Modals state
   const [showUserModal, setShowUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'student', section: '', rollNumber: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'student', rollNumber: '', section: '', branch: '', batch: '' });
   
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [newBatch, setNewBatch] = useState({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 200 });
@@ -295,8 +295,8 @@ export default function AdminDashboard() {
                 <>
                   <div>
                     <select 
-                      value={newUser.section} 
-                      onChange={e => setNewUser({...newUser, section: e.target.value})} 
+                      value={newUser.batch} 
+                      onChange={e => setNewUser({...newUser, batch: e.target.value})} 
                       className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                       required
                     >
@@ -306,6 +306,8 @@ export default function AdminDashboard() {
                       ))}
                     </select>
                   </div>
+                  <div><input type="text" placeholder="Branch (e.g. CSE)" required value={newUser.branch} onChange={e => setNewUser({...newUser, branch: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+                  <div><input type="text" placeholder="Section (e.g. A)" required value={newUser.section} onChange={e => setNewUser({...newUser, section: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
                   <div><input type="text" placeholder="Roll Number" value={newUser.rollNumber} onChange={e => setNewUser({...newUser, rollNumber: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
                 </>
               )}

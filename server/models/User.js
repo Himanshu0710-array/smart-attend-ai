@@ -9,7 +9,9 @@ const userSchema = new mongoose.Schema({
   
   // Student specific
   rollNumber: { type: String },
-  section: { type: String }, // Used as Batch name
+  section: { type: String }, // e.g. A, B
+  branch: { type: String }, // e.g. CSE
+  batch: { type: String }, // e.g. Algo Avengers
   course: { type: String },
   semester: { type: String },
   
