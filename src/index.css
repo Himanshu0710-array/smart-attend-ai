@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+.dark body {
+  @apply bg-slate-950 text-slate-100;
+}
+
+/* Custom Micro Animations */
+.hover-scale {
+  @apply transition-transform duration-200 hover:scale-[1.02];
+}
+
+.glass-effect {
+  @apply bg-white/70 backdrop-blur-md border border-slate-200/50 shadow-lg;
+}
+.dark .glass-effect {
+  @apply bg-slate-900/70 border-slate-800/50;
+}
