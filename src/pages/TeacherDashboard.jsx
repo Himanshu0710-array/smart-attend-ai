@@ -108,13 +108,17 @@ export default function TeacherDashboard() {
   }, [activeTab, teacherName, selectedHistorySession]);
 
   // Fetch Timetable when tab changes to timetable
+  const fetchTimetable = useCallback(() => {
+    api.getTimetable().then(data => {
+      setTimetableData(data);
+    }).catch(console.error);
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'timetable') {
-      api.getTimetable().then(data => {
-        setTimetableData(data);
-      }).catch(console.error);
+      fetchTimetable();
     }
-  }, [activeTab]);
+  }, [activeTab, fetchTimetable]);
 
   const present = studentList.filter(s => s.status === 'Present').length;
   const absent = studentList.filter(s => s.status === 'Absent').length;

@@ -344,9 +344,32 @@ app.get('/api/teacher/history/:teacherName', requireAuth, async (req, res) => {
 // ========= TIMETABLE ROUTES =========
 app.get('/api/timetable', requireAuth, async (req, res) => {
   try {
+    const batches = await Batch.find();
     const timetables = await Timetable.find();
+    
     const data = {};
-    timetables.forEach(t => { data[t.batch] = t.schedule; });
+    const defaultSchedule = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => ({
+      date: day,
+      slots: [
+        { subject: '', teacher: '', room: '' },
+        { subject: '', teacher: '', room: '' },
+        { subject: '', teacher: '', room: '' },
+        { subject: '', teacher: '', room: '' }
+      ]
+    }));
+
+    for (const b of batches) {
+      let t = timetables.find(doc => doc.batch === b.name);
+      if (!t) {
+        t = new Timetable({
+          batch: b.name,
+          schedule: JSON.parse(JSON.stringify(defaultSchedule)) // deep copy
+        });
+        await t.save();
+      }
+      data[b.name] = t.schedule;
+    }
+    
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
