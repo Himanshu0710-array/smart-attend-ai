@@ -56,6 +56,13 @@ export default function TeacherDashboard() {
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [studentListForTeacher, setStudentListForTeacher] = useState([]);
 
+  // Notices State
+  const [notices, setNotices] = useState([]);
+  const [lowAttendanceStudents, setLowAttendanceStudents] = useState([]);
+  const [showNoticeModal, setShowNoticeModal] = useState(false);
+  const [newNotice, setNewNotice] = useState({ title: '', message: '', targetType: 'batch', targetId: '' });
+  const [isSendingNotice, setIsSendingNotice] = useState(false);
+
   const teacherName = userData?.name || 'Teacher';
 
   // Load classrooms on mount
@@ -144,6 +151,9 @@ export default function TeacherDashboard() {
   useEffect(() => {
     if (activeTab === 'students') {
       fetchStudents();
+    } else if (activeTab === 'notices') {
+      api.getNotices().then(setNotices).catch(console.error);
+      api.getLowAttendanceStudents().then(setLowAttendanceStudents).catch(console.error);
     }
   }, [activeTab, fetchStudents]);
 
@@ -356,6 +366,7 @@ export default function TeacherDashboard() {
           { id: 'reports', label: 'Reports' },
           { id: 'timetable', label: 'Time Table' },
           { id: 'students', label: 'Manage Students' },
+          { id: 'notices', label: 'Notices' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1007,6 +1018,105 @@ export default function TeacherDashboard() {
                 <button type="button" onClick={() => setShowStudentModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white" disabled={isCreatingStudent}>Cancel</button>
                 <button type="submit" disabled={isCreatingStudent} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">
                   {isCreatingStudent ? 'Creating...' : 'Create Student'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          NOTICES TAB
+          ========================================================================= */}
+      {activeTab === 'notices' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Announcements & Notices</h2>
+            <button onClick={() => setShowNoticeModal(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+              Send Notice
+            </button>
+          </div>
+
+          <div className="grid gap-4">
+            {notices.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">No notices sent yet.</div>
+            ) : (
+              notices.map(notice => (
+                <div key={notice._id} className="pro-card p-5 border-l-4 border-l-blue-500">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-slate-900 dark:text-white text-lg">{notice.title}</h3>
+                    <span className="text-xs text-slate-500">{new Date(notice.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 mb-3">{notice.message}</p>
+                  <div className="text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 w-fit px-3 py-1 rounded-full">
+                    Target: {notice.targetType === 'batch' ? `Batch (${notice.targetId})` : `Student ID (${notice.targetId})`}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Notice Modal */}
+      {showNoticeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="pro-card p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Send Notice</h2>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setIsSendingNotice(true);
+              try {
+                await api.createNotice(newNotice);
+                setShowNoticeModal(false);
+                setNewNotice({ title: '', message: '', targetType: 'batch', targetId: '' });
+                const updated = await api.getNotices();
+                setNotices(updated);
+              } catch (err) {
+                alert('Failed to send notice');
+              } finally {
+                setIsSendingNotice(false);
+              }
+            }} className="space-y-4">
+              
+              <div>
+                <label className="block text-sm mb-1 dark:text-white">Target Type</label>
+                <select value={newNotice.targetType} onChange={e => setNewNotice({...newNotice, targetType: e.target.value, targetId: e.target.value === 'low-attendance' ? 'all' : ''})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
+                  <option value="batch">Entire Batch</option>
+                  <option value="low-attendance">All Low Attendance Students (&lt;75%)</option>
+                  <option value="student">Specific Student</option>
+                </select>
+              </div>
+
+              {newNotice.targetType !== 'low-attendance' && (
+                <div>
+                  <label className="block text-sm mb-1 dark:text-white">Select Target</label>
+                  <select required value={newNotice.targetId} onChange={e => setNewNotice({...newNotice, targetId: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
+                    <option value="" disabled>Select...</option>
+                    {newNotice.targetType === 'batch' ? (
+                      classrooms.map(b => (
+                        <option key={b.id} value={b.name}>{b.name}</option>
+                      ))
+                    ) : (
+                      studentListForTeacher.map(s => (
+                        <option key={s.uid} value={s.uid}>{s.name} ({s.rollNumber})</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <input type="text" placeholder="Notice Title" required value={newNotice.title} onChange={e => setNewNotice({...newNotice, title: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+              </div>
+              <div>
+                <textarea placeholder="Message..." required rows={4} value={newNotice.message} onChange={e => setNewNotice({...newNotice, message: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"></textarea>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-6">
+                <button type="button" onClick={() => setShowNoticeModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white" disabled={isSendingNotice}>Cancel</button>
+                <button type="submit" disabled={isSendingNotice} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                  {isSendingNotice ? 'Sending...' : 'Send Notice'}
                 </button>
               </div>
             </form>

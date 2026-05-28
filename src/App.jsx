@@ -11,6 +11,7 @@ import StudentDashboard from './pages/StudentDashboard';
 import MarkAttendance from './pages/MarkAttendance';
 import TeacherDashboard from './pages/TeacherDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import StudentSettings from './pages/StudentSettings';
 
 function DashboardRedirect() {
   const { userData } = useAuth();
@@ -57,10 +58,7 @@ function App() {
             } />
             <Route path="student/settings" element={
               <ProtectedRoute allowedRoles={['student']}>
-                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8">
-                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Settings</h2>
-                  <p className="text-slate-500">Student settings coming soon.</p>
-                </div>
+                <StudentSettings />
               </ProtectedRoute>
             } />
 

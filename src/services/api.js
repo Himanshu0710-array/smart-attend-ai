@@ -58,6 +58,7 @@ export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { met
 
 // Attendance
 export const getAttendance = (sessionId) => request(`/attendance/${sessionId}`);
+export const getSessionRecords = (sessionId) => request(`/attendance/${sessionId}`);
 export const markAttendance = (sessionId, studentUid, distance, isLate) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, distance, isLate }) });
 export const reverifyAttendance = (sessionId, studentUid, isInsideGeofence, distance) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, isInsideGeofence, distance }) });
 
@@ -71,3 +72,12 @@ export const getTeacherStudents = () => request('/teacher/students');
 // Timetable
 export const getTimetable = () => request('/timetable');
 export const updateTimetable = (batch, date, slotIndex, data) => request('/timetable/update', { method: 'POST', body: JSON.stringify({ batch, date, slotIndex, data }) });
+
+// User Management & Settings
+export const updateUser = (uid, data) => request(`/users/${uid}`, { method: 'PUT', body: JSON.stringify(data) });
+export const updatePassword = (uid, oldPassword, newPassword) => request(`/users/${uid}/password`, { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) });
+
+// Notices & Announcements
+export const createNotice = (data) => request('/notices', { method: 'POST', body: JSON.stringify(data) });
+export const getNotices = (batch = '', uid = '') => request(`/notices?batch=${encodeURIComponent(batch)}&uid=${encodeURIComponent(uid)}`);
+export const getLowAttendanceStudents = () => request('/teacher/low-attendance');

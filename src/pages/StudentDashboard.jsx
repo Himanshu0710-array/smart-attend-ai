@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../services/api';
-import { MapPin, Clock, CheckCircle, XCircle, AlertTriangle, CalendarDays, TrendingUp, BookOpen } from 'lucide-react';
+import { MapPin, Clock, CheckCircle, XCircle, AlertTriangle, CalendarDays, TrendingUp, BookOpen, Bell } from 'lucide-react';
 
 const statusStyles = {
   'Present': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -28,6 +28,7 @@ export default function StudentDashboard() {
   const [liveSessions, setLiveSessions] = useState([]);
   const [sessionStatuses, setSessionStatuses] = useState({}); // { [sessionId]: myStatus }
   const [history, setHistory] = useState([]);
+  const [notices, setNotices] = useState([]);
 
   // Poll for live sessions every 3 seconds
   useEffect(() => {
@@ -51,10 +52,11 @@ export default function StudentDashboard() {
     return () => clearInterval(interval);
   }, [studentGroup, studentUid]);
 
-  // Fetch history
+  // Fetch history and notices
   useEffect(() => {
     api.getStudentHistory(studentUid).then(setHistory).catch(console.error);
-  }, [studentUid]);
+    api.getNotices(userData?.batch, studentUid).then(setNotices).catch(console.error);
+  }, [studentUid, userData?.batch]);
 
   const totalClasses = history.length;
   const attended = history.filter(h => h.status === 'Present' || h.status === 'Late Entry').length;
@@ -77,6 +79,27 @@ export default function StudentDashboard() {
           Roll: {userData?.rollNumber || 'N/A'}
         </span>
       </div>
+
+      {/* Notices & Announcements */}
+      {notices.length > 0 && (
+        <div className="pro-card p-6 border-l-4 border-l-amber-500">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+            <Bell className="w-5 h-5 text-amber-500" /> Announcements
+          </h2>
+          <div className="space-y-4 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
+            {notices.map(notice => (
+              <div key={notice._id} className="pb-4 border-b border-slate-100 dark:border-slate-800 last:border-0 last:pb-0">
+                <div className="flex justify-between items-start mb-1">
+                  <h3 className="font-semibold text-slate-900 dark:text-white">{notice.title}</h3>
+                  <span className="text-xs text-slate-500">{new Date(notice.createdAt).toLocaleString()}</span>
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-300 mb-2">{notice.message}</p>
+                <div className="text-xs font-medium text-slate-500">From: {notice.teacherName}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

@@ -9,6 +9,7 @@ import { Batch } from './models/Batch.js';
 import { Session } from './models/Session.js';
 import { Attendance } from './models/Attendance.js';
 import { Timetable } from './models/Timetable.js';
+import { Notice } from './models/Notice.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 
 dotenv.config();
@@ -608,6 +609,165 @@ app.post('/api/timetable/update', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// ========= SETTINGS & USER MANAGEMENT =========
+app.put('/api/users/:uid/password', requireAuth, async (req, res) => {
+  try {
+    const { uid } = req.params;
+    // Only the user themselves can change their own password (or an admin)
+    if (req.user.uid !== uid && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    const { oldPassword, newPassword } = req.body;
+    const user = await User.findOne({ uid });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Admins don't need the old password to force change
+    if (req.user.role !== 'admin') {
+      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      if (!isMatch) return res.status(400).json({ error: 'Incorrect old password' });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/users/:uid', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
+    const { uid } = req.params;
+    const updateData = req.body;
+    
+    // Do not update password here
+    delete updateData.password;
+
+    const user = await User.findOneAndUpdate({ uid }, updateData, { new: true });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========= NOTICES & ANNOUNCEMENTS =========
+app.post('/api/notices', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    const { title, message, targetType, targetId } = req.body;
+
+    if (targetType === 'low-attendance') {
+      // Calculate low attendance and send to all
+      const students = await User.find({ role: 'student' });
+      const noticesToInsert = [];
+
+      for (const student of students) {
+        const records = await Attendance.find({ studentUid: student.uid });
+        const total = records.length;
+        if (total === 0) continue;
+
+        const attended = records.filter(r => r.status === 'Present' || r.status === 'Late Entry').length;
+        const percentage = (attended / total) * 100;
+
+        if (percentage < 75) {
+          noticesToInsert.push({
+            title,
+            message,
+            teacherName: req.user.name || 'Teacher',
+            targetType: 'student',
+            targetId: student.uid
+          });
+        }
+      }
+
+      if (noticesToInsert.length > 0) {
+        await Notice.insertMany(noticesToInsert);
+      }
+      return res.status(201).json({ success: true, count: noticesToInsert.length });
+    }
+
+    // Standard single notice
+    if (!targetId) return res.status(400).json({ error: 'Target ID required' });
+
+    const notice = new Notice({
+      title,
+      message,
+      teacherName: req.user.name || 'Teacher',
+      targetType,
+      targetId
+    });
+    await notice.save();
+    res.status(201).json(notice);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/notices', requireAuth, async (req, res) => {
+  try {
+    const { batch, uid } = req.query;
+    let query = {};
+    
+    if (req.user.role === 'student') {
+      // Students see notices targeted to their batch or their specific UID
+      query = {
+        $or: [
+          { targetType: 'batch', targetId: batch },
+          { targetType: 'student', targetId: uid }
+        ]
+      };
+    } else if (req.user.role === 'teacher') {
+      // Teachers see notices they created
+      query = { teacherName: req.user.name };
+    }
+    
+    const notices = await Notice.find(query).sort({ createdAt: -1 }).limit(20);
+    res.json(notices);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/teacher/low-attendance', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Unauthorized' });
+    
+    // Get all students
+    const students = await User.find({ role: 'student' });
+    const lowAttendanceStudents = [];
+
+    // Calculate attendance for each student
+    for (const student of students) {
+      const records = await Attendance.find({ studentUid: student.uid });
+      const total = records.length;
+      if (total === 0) continue;
+
+      const attended = records.filter(r => r.status === 'Present' || r.status === 'Late Entry').length;
+      const percentage = (attended / total) * 100;
+
+      if (percentage < 75) {
+        lowAttendanceStudents.push({
+          uid: student.uid,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          batch: student.batch,
+          percentage: percentage.toFixed(1)
+        });
+      }
+    }
+
+    res.json(lowAttendanceStudents);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 // Health check
 app.get('/api/health', async (req, res) => {

@@ -20,8 +20,11 @@ export default function AdminDashboard() {
   const [showUserModal, setShowUserModal] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'student', rollNumber: '', section: '', branch: '', batch: '' });
   
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [newBatch, setNewBatch] = useState({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 200 });
+  const [newBatch, setNewBatch] = useState({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 50 });
 
   useEffect(() => {
     fetchData();
@@ -54,6 +57,23 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    try {
+      await api.updateUser(editUser.uid, editUser);
+      setShowEditUserModal(false);
+      setEditUser(null);
+      fetchData();
+    } catch (e) {
+      alert(e.error || 'Failed to update user');
+    }
+  };
+
+  const openEditModal = (user) => {
+    setEditUser({ ...user });
+    setShowEditUserModal(true);
+  };
+
   const handleDeleteUser = async (uid) => {
     if(window.confirm('Delete this user?')) {
       try {
@@ -71,7 +91,7 @@ export default function AdminDashboard() {
       const b = { ...newBatch, section: newBatch.name };
       await api.createBatch(b);
       setShowBatchModal(false);
-      setNewBatch({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 200 });
+      setNewBatch({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 50 });
       fetchData();
     } catch (e) {
       alert(e.error || 'Failed to create batch');
@@ -220,6 +240,9 @@ export default function AdminDashboard() {
                     <td className="py-3 px-3 text-sm text-slate-600 dark:text-slate-300">{user.section || '-'}</td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1">
+                        <button onClick={() => openEditModal(user)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-blue-500 transition-colors">
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button onClick={() => handleDeleteUser(user.uid)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -314,6 +337,52 @@ export default function AdminDashboard() {
               <div className="flex justify-end gap-2 mt-6">
                 <button type="button" onClick={() => setShowUserModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditUserModal && editUser && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="pro-card p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Edit User</h2>
+            <form onSubmit={handleUpdateUser} className="space-y-4">
+              <div>
+                <label className="block text-sm mb-1 dark:text-white">Role</label>
+                <select value={editUser.role} onChange={e => setEditUser({...editUser, role: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
+                  <option value="student">Student</option>
+                  <option value="teacher">Teacher</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div><input type="text" placeholder="Name" required value={editUser.name} onChange={e => setEditUser({...editUser, name: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div><input type="email" placeholder="Email" required value={editUser.email} onChange={e => setEditUser({...editUser, email: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              
+              {editUser.role === 'student' && (
+                <>
+                  <div>
+                    <select 
+                      value={editUser.batch || ''} 
+                      onChange={e => setEditUser({...editUser, batch: e.target.value})} 
+                      className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                      required
+                    >
+                      <option value="" disabled>Select Batch</option>
+                      {batches.map(b => (
+                        <option key={b.id} value={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div><input type="text" placeholder="Branch (e.g. CSE)" required value={editUser.branch || ''} onChange={e => setEditUser({...editUser, branch: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+                  <div><input type="text" placeholder="Section (e.g. A)" required value={editUser.section || ''} onChange={e => setEditUser({...editUser, section: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+                  <div><input type="text" placeholder="Roll Number" value={editUser.rollNumber || ''} onChange={e => setEditUser({...editUser, rollNumber: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+                </>
+              )}
+              <div className="flex justify-end gap-2 mt-6">
+                <button type="button" onClick={() => { setShowEditUserModal(false); setEditUser(null); }} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg">Save Changes</button>
               </div>
             </form>
           </div>

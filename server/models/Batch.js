@@ -9,7 +9,7 @@ const batchSchema = new mongoose.Schema({
   teacher: { type: String }, // default teacher
   lat: { type: Number, required: true },
   lon: { type: Number, required: true },
-  radius: { type: Number, required: true, default: 200 }
+  radius: { type: Number, required: true, default: 50 }
 }, { timestamps: true });
 
 export const Batch = mongoose.model('Batch', batchSchema);
