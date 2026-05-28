@@ -42,13 +42,29 @@ app.use(cors({
 app.use(express.json());
 
 // ========= DATABASE CONNECTION & SEEDING =========
-mongoose.connect(process.env.MONGODB_URI)
-  .then(async () => {
-    console.log('✅ Connected to MongoDB Atlas');
-    await seedAdmin();
-    await seedTimetableData();
-  })
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+async function connectWithRetry(retries = 5, delay = 3000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      console.log(`🔄 MongoDB connection attempt ${i}/${retries}...`);
+      await mongoose.connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 10000,
+      });
+      console.log('✅ Connected to MongoDB Atlas');
+      await seedAdmin();
+      await seedTimetableData();
+      return;
+    } catch (err) {
+      console.error(`❌ MongoDB attempt ${i} failed:`, err.message);
+      if (i < retries) {
+        console.log(`⏳ Retrying in ${delay / 1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 1.5; // increase delay each retry
+      }
+    }
+  }
+  console.error('❌ All MongoDB connection attempts failed. Server running without DB.');
+}
+connectWithRetry();
 
 async function seedAdmin() {
   const adminExists = await User.findOne({ role: 'admin' });
