@@ -96,7 +96,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     res.json({ token, user: userData });
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
@@ -130,7 +131,8 @@ app.post('/api/auth/signup', async (req, res) => {
 
     res.json({ token, user: userData });
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('Signup error:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
@@ -583,7 +585,38 @@ app.post('/api/timetable/update', requireAuth, async (req, res) => {
 
 // Health check
 app.get('/api/health', async (req, res) => {
-  res.json({ status: 'ok' });
+  const dbState = mongoose.connection.readyState;
+  const dbStates = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+  res.json({ 
+    status: dbState === 1 ? 'ok' : 'degraded',
+    database: dbStates[dbState] || 'unknown',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug endpoint - shows what's configured
+app.get('/api/debug/status', async (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStates = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+  
+  let userCount = 0;
+  let adminExists = false;
+  try {
+    userCount = await User.countDocuments();
+    adminExists = !!(await User.findOne({ role: 'admin' }));
+  } catch (e) {
+    // DB not connected
+  }
+  
+  res.json({
+    database: dbStates[dbState] || 'unknown',
+    mongoUri: process.env.MONGODB_URI ? 'SET (hidden)' : 'NOT SET',
+    jwtSecret: process.env.JWT_SECRET ? 'SET' : 'NOT SET',
+    frontendUrl: process.env.FRONTEND_URL || 'NOT SET',
+    userCount,
+    adminExists,
+    nodeEnv: process.env.NODE_ENV || 'not set'
+  });
 });
 
 const PORT = process.env.PORT || 3001;
