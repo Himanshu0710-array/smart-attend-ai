@@ -11,8 +11,8 @@ export default function Signup() {
     confirmPassword: '',
     role: 'student',
     rollNumber: '',
-    course: '',
-    semester: '',
+    batch: '',
+    branch: '',
     section: '',
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -101,22 +101,22 @@ export default function Signup() {
                     placeholder="CS2024001" />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Batch</label>
+                  <input name="batch" type="text" value={formData.batch} onChange={handleChange} required
+                    className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                    placeholder="e.g. Algo Avengers" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Branch</label>
+                  <input name="branch" type="text" value={formData.branch} onChange={handleChange} required
+                    className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                    placeholder="e.g. CSE" />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Section</label>
-                  <input name="section" type="text" value={formData.section} onChange={handleChange}
+                  <input name="section" type="text" value={formData.section} onChange={handleChange} required
                     className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                    placeholder="A" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Course</label>
-                  <input name="course" type="text" value={formData.course} onChange={handleChange}
-                    className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                    placeholder="B.Tech CS" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Semester</label>
-                  <input name="semester" type="text" value={formData.semester} onChange={handleChange}
-                    className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                    placeholder="4th" />
+                    placeholder="e.g. A" />
                 </div>
               </div>
             )}

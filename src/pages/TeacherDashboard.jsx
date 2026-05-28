@@ -3,9 +3,10 @@ import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
 import {
   Users, Play, Square, Clock, CheckCircle, XCircle, AlertTriangle,
-  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save
+  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save, PieChart
 } from 'lucide-react';
-
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 const statusStyles = {
   'Present': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   'Absent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -53,6 +54,7 @@ export default function TeacherDashboard() {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
+  const [studentListForTeacher, setStudentListForTeacher] = useState([]);
 
   const teacherName = userData?.name || 'Teacher';
 
@@ -129,6 +131,107 @@ export default function TeacherDashboard() {
       fetchTimetable();
     }
   }, [activeTab, fetchTimetable]);
+
+  const fetchStudents = useCallback(async () => {
+    try {
+      const data = await api.getTeacherStudents();
+      setStudentListForTeacher(data);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'students') {
+      fetchStudents();
+    }
+  }, [activeTab, fetchStudents]);
+
+  const generateReport = useCallback(async (filters = reportFilters) => {
+    setLoadingReport(true);
+    try {
+      const data = await api.getTeacherReports(filters);
+      setReportData(data);
+    } catch (e) { console.error(e); }
+    setLoadingReport(false);
+  }, [reportFilters]);
+
+  const downloadStudentReport = async (student) => {
+    try {
+      if (!student.uid) {
+        alert("Student ID is missing. Please refresh the report.");
+        return;
+      }
+      
+      // 1. Fetch full history for this student
+      const history = await api.getStudentHistory(student.uid);
+      
+      // 2. Filter by currently selected date range (if any)
+      const filteredHistory = history.filter(record => {
+        let isWithinRange = true;
+        
+        // Ensure date string has a year so it parses correctly
+        const dateStr = record.date.match(/\d{4}/) 
+          ? record.date 
+          : `${record.date}, ${new Date().getFullYear()}`;
+        const recordDate = new Date(dateStr);
+
+        if (reportFilters.startDate) {
+          isWithinRange = isWithinRange && (recordDate >= new Date(reportFilters.startDate));
+        }
+        if (reportFilters.endDate) {
+          const end = new Date(reportFilters.endDate);
+          end.setHours(23, 59, 59, 999);
+          isWithinRange = isWithinRange && (recordDate <= end);
+        }
+        return isWithinRange;
+      });
+
+      // 3. Generate PDF
+      const doc = new jsPDF();
+      const perc = student.totalClasses > 0 ? ((student.attended / student.totalClasses) * 100).toFixed(1) : 0;
+
+      // Header
+      doc.setFontSize(20);
+      doc.text("Student Attendance Report", 14, 22);
+      
+      doc.setFontSize(11);
+      doc.text(`Name: ${student.name}`, 14, 32);
+      doc.text(`Roll No: ${student.rollNumber}`, 14, 38);
+      doc.text(`Batch / Branch: ${student.batch} / ${student.branch}`, 14, 44);
+      doc.text(`Overall Attendance: ${student.attended} / ${student.totalClasses} (${perc}%)`, 14, 50);
+
+      if (reportFilters.startDate || reportFilters.endDate) {
+         doc.text(`Filter Period: ${reportFilters.startDate || 'Start'} to ${reportFilters.endDate || 'End'}`, 14, 56);
+      }
+
+      // Table Data
+      const tableData = filteredHistory.map(r => [
+        r.date, 
+        r.subject || '-', 
+        r.status, 
+        r.time
+      ]);
+
+      autoTable(doc, {
+        startY: 65,
+        head: [['Date', 'Subject', 'Status', 'Time']],
+        body: tableData,
+      });
+
+      doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`);
+    } catch (err) {
+      console.error('PDF Generation Error:', err);
+      alert(`Failed to generate PDF. Error: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Auto-generate report when landing on reports tab
+  useEffect(() => {
+    if (activeTab === 'reports' && reportData.length === 0) {
+      generateReport();
+    }
+  }, [activeTab, reportData.length, generateReport]);
 
   const present = studentList.filter(s => s.status === 'Present').length;
   const absent = studentList.filter(s => s.status === 'Absent').length;
@@ -220,6 +323,7 @@ export default function TeacherDashboard() {
       alert('Student created successfully!');
       setShowStudentModal(false);
       setNewStudent({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
+      fetchStudents();
     } catch (error) {
       alert(error.error || 'Failed to create student');
     } finally {
@@ -266,6 +370,67 @@ export default function TeacherDashboard() {
           </button>
         ))}
       </div>
+
+      {/* =========================================================================
+          TAB: STUDENTS (MANAGE)
+          ========================================================================= */}
+      {activeTab === 'students' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-6 h-6 text-blue-500" /> Manage Students
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">View and register new students to your classes.</p>
+            </div>
+            <button onClick={() => setShowStudentModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow shrink-0">
+              + Register Student
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                  <tr>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Student Name</th>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Roll Number</th>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Batch / Section</th>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Branch</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {studentListForTeacher.map((student) => (
+                    <tr key={student.uid} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                      <td className="py-3 px-4 text-slate-900 dark:text-white font-medium flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                          {student.name.charAt(0)}
+                        </div>
+                        {student.name}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono">{student.rollNumber || '-'}</td>
+                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                        {student.batch || student.section || '-'}
+                        {student.batch && student.section && student.batch !== student.section && ` (${student.section})`}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                        {student.branch || '-'}
+                      </td>
+                    </tr>
+                  ))}
+                  {studentListForTeacher.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-12 text-center text-slate-500">
+                        No students found. Register some students above!
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =========================================================================
           TAB: LIVE SESSION
@@ -527,8 +692,126 @@ export default function TeacherDashboard() {
           </div>
         </div>
       )}
+      {/* =========================================================================
+          TAB: REPORTS
+          ========================================================================= */}
+      {activeTab === 'reports' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
+              <PieChart className="w-6 h-6 text-indigo-500" /> Attendance Reports
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
+                <input type="date" value={reportFilters.startDate} onChange={e => setReportFilters({...reportFilters, startDate: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">End Date</label>
+                <input type="date" value={reportFilters.endDate} onChange={e => setReportFilters({...reportFilters, endDate: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Batch</label>
+                <select value={reportFilters.batch} onChange={e => setReportFilters({...reportFilters, batch: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white">
+                  <option value="">All Batches</option>
+                  {classrooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Branch</label>
+                <input type="text" placeholder="e.g. CSE" value={reportFilters.branch} onChange={e => setReportFilters({...reportFilters, branch: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Section</label>
+                <input type="text" placeholder="e.g. A" value={reportFilters.section} onChange={e => setReportFilters({...reportFilters, section: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 mb-6">
+              <button 
+                onClick={() => generateReport(reportFilters)} 
+                disabled={loadingReport}
+                className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                {loadingReport ? 'Generating...' : 'Generate Report'}
+              </button>
+              {reportData.length > 0 && (
+                <button
+                  onClick={() => {
+                    const headers = 'Name,Roll Number,Batch,Branch,Total Classes,Attended,Percentage\n';
+                    const rows = reportData.map(s => `${s.name},${s.rollNumber},${s.batch},${s.branch},${s.totalClasses},${s.attended},${s.totalClasses > 0 ? ((s.attended/s.totalClasses)*100).toFixed(1) : 0}%`).join('\n');
+                    const blob = new Blob([headers + rows], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `Report_${new Date().toLocaleDateString()}.csv`;
+                    a.click();
+                  }}
+                  className="px-6 py-2 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> Export CSV
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              {reportData.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <p>No data to display. Adjust filters and generate report.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="py-3 px-4 font-medium text-slate-500">Student Name</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Roll No.</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Batch / Branch</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Classes Attended</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Attendance %</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {reportData.map((student) => {
+                      const perc = student.totalClasses > 0 ? ((student.attended / student.totalClasses) * 100).toFixed(1) : 0;
+                      return (
+                        <tr key={student.uid} className="hover:bg-slate-50 dark:hover:bg-slate-800/20">
+                          <td className="py-3 px-4 text-slate-900 dark:text-white font-medium">{student.name}</td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono">{student.rollNumber}</td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{student.batch} • {student.branch}</td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{student.attended} / {student.totalClasses}</td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${perc >= 75 ? 'bg-emerald-100 text-emerald-800' : perc >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
+                              {perc}%
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <button 
+                              onClick={() => downloadStudentReport(student)}
+                              className="text-sm px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-1.5"
+                            >
+                              <FileText className="w-4 h-4" /> View Report
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =========================================================================
+          TAB: TIMETABLE
+          ========================================================================= */}
+      {activeTab === 'timetable' && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col h-full">
+          
+          {/* Header & Batch Selector */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <CalendarIcon className="w-6 h-6 text-purple-500" />
               CRT Timetable

@@ -14,7 +14,24 @@ import { requireAuth, requireAdmin } from './middleware/auth.js';
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 app.use(express.json());
 
 // ========= DATABASE CONNECTION & SEEDING =========
@@ -115,6 +132,18 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/teacher/students', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const students = await User.find({ role: 'student' }, '-password').sort({ createdAt: -1 });
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/api/admin/users/:uid', requireAuth, requireAdmin, async (req, res) => {
   try {
     await User.findOneAndDelete({ uid: req.params.uid });
@@ -192,8 +221,15 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
     });
     await newSession.save();
 
-    // Find all students in this batch
-    const students = await User.find({ role: 'student', section: batch.section });
+    // Find all students in this batch (supports legacy 'section' field or new 'batch' field)
+    const students = await User.find({ 
+      role: 'student', 
+      $or: [
+        { batch: batch.name },
+        { section: batch.name },
+        { section: batch.section }
+      ]
+    });
     
     if (students.length > 0) {
       const attendanceDocs = students.map(student => ({
@@ -374,6 +410,7 @@ app.post('/api/teacher/reports', requireAuth, async (req, res) => {
     const studentMap = {};
     students.forEach(s => {
       studentMap[s.uid] = {
+        uid: s.uid,
         name: s.name,
         rollNumber: s.rollNumber || 'N/A',
         branch: s.branch || 'N/A',
@@ -388,7 +425,7 @@ app.post('/api/teacher/reports', requireAuth, async (req, res) => {
     const teacher = await User.findOne({ uid: req.user.uid });
     const sessionQuery = {};
     if (req.user.role === 'teacher') {
-      sessionQuery.teacherName = teacher.name;
+      sessionQuery.teacher = teacher.name;
     }
     
     if (startDate || endDate) {

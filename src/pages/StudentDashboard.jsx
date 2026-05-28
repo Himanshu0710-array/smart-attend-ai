@@ -22,7 +22,7 @@ export default function StudentDashboard() {
   const { userData } = useAuth();
   const navigate = useNavigate();
 
-  const studentSection = userData?.section || 'A';
+  const studentGroup = userData?.batch || userData?.section || 'A';
   const studentUid = userData?.uid || 'demo-student-001';
 
   const [liveSessions, setLiveSessions] = useState([]);
@@ -33,7 +33,7 @@ export default function StudentDashboard() {
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const sessions = await api.getSessions(studentSection);
+        const sessions = await api.getSessions(studentGroup);
         setLiveSessions(sessions);
 
         // Fetch my status for each session
@@ -49,7 +49,7 @@ export default function StudentDashboard() {
     fetchSessions();
     const interval = setInterval(fetchSessions, 3000);
     return () => clearInterval(interval);
-  }, [studentSection, studentUid]);
+  }, [studentGroup, studentUid]);
 
   // Fetch history
   useEffect(() => {
@@ -69,7 +69,7 @@ export default function StudentDashboard() {
             Welcome back, {userData?.name?.split(' ')[0] || 'Student'} 👋
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            {userData?.course || 'Course'} • Semester {userData?.semester || '—'} • Section {userData?.section || '—'}
+            {userData?.branch || userData?.course || 'Branch'} • {userData?.batch || 'Batch'} • Section {userData?.section || '—'}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full w-fit">

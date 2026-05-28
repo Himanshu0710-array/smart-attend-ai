@@ -19,7 +19,8 @@ function getDistance(lat1, lon1, lat2, lon2) {
 
 export default function MarkAttendance() {
   const { userData } = useAuth();
-  const studentSection = userData?.section || 'A';
+  // Use batch for new students, fallback to section for legacy students
+  const studentGroup = userData?.batch || userData?.section || 'A';
   const studentUid = userData?.uid || 'demo-student-001';
 
   const [liveSessions, setLiveSessions] = useState([]);
@@ -37,7 +38,7 @@ export default function MarkAttendance() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const sessions = await api.getSessions(studentSection);
+        const sessions = await api.getSessions(studentGroup);
         setLiveSessions(sessions);
         if (sessions.length > 0 && !selectedSession) {
           setSelectedSession(sessions[0]);
@@ -53,7 +54,7 @@ export default function MarkAttendance() {
     fetch();
     const interval = setInterval(fetch, 3000);
     return () => clearInterval(interval);
-  }, [studentSection, selectedSession]);
+  }, [studentGroup, selectedSession]);
 
   // Fetch my current status in selected session
   useEffect(() => {

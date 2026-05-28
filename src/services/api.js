@@ -57,6 +57,7 @@ export const getStudentHistory = (studentUid) => request(`/history/${studentUid}
 export const getTeacherHistory = (teacherName) => request(`/teacher/history/${teacherName}`);
 export const getTeacherReports = (filters) => request('/teacher/reports', { method: 'POST', body: JSON.stringify(filters) });
 export const createStudentByTeacher = (studentData) => request('/admin/users', { method: 'POST', body: JSON.stringify({ ...studentData, role: 'student' }) });
+export const getTeacherStudents = () => request('/teacher/students');
 
 // Timetable
 export const getTimetable = () => request('/timetable');
