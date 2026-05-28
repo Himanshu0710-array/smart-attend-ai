@@ -88,7 +88,7 @@ export default function StudentDashboard() {
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className={`${stat.bgLight} rounded-2xl p-5 border border-slate-200/50 dark:border-slate-800/50 hover:shadow-md transition-shadow`}>
+            <div key={stat.label} className={`${stat.bgLight} rounded-2xl p-5 border border-slate-200/50 dark:border-slate-700/50 hover:shadow-md transition-shadow`}>
               <div className={`inline-flex p-2.5 rounded-xl bg-gradient-to-br ${stat.color} mb-3`}>
                 <Icon className="w-5 h-5 text-white" />
               </div>
@@ -100,7 +100,7 @@ export default function StudentDashboard() {
       </div>
 
       {/* Active Sessions */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <div className="pro-card p-6">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
           Active Sessions
           {liveSessions.length > 0 && (
@@ -154,7 +154,7 @@ export default function StudentDashboard() {
       </div>
 
       {/* Recent Attendance History */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <div className="pro-card p-6">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Recent History</h2>
         {history.length === 0 ? (
           <div className="text-center py-8 text-slate-400 dark:text-slate-500">

@@ -156,7 +156,7 @@ export default function AdminDashboard() {
 
       {/* Users Tab */}
       {activeTab === 'users' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+        <div className="pro-card p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center gap-3 flex-1">
               <div className="relative flex-1 max-w-sm">
@@ -244,7 +244,7 @@ export default function AdminDashboard() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {batches.map((room) => (
-              <div key={room.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 hover:shadow-md transition-shadow">
+              <div key={room.id} className="pro-card p-6 hover:shadow-md transition-shadow">
                 <div className="flex items-start justify-between mb-4">
                   <div className="p-2.5 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600">
                     <Building2 className="w-5 h-5 text-white" />
@@ -276,7 +276,7 @@ export default function AdminDashboard() {
       {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md">
+          <div className="pro-card p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4 dark:text-white">Add User</h2>
             <form onSubmit={handleCreateUser} className="space-y-4">
               <div>
@@ -323,7 +323,7 @@ export default function AdminDashboard() {
       {/* Batch Modal */}
       {showBatchModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md">
+          <div className="pro-card p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4 dark:text-white">Add Batch</h2>
             <form onSubmit={handleCreateBatch} className="space-y-4">
               <div><input type="text" placeholder="Batch Name" required value={newBatch.name} onChange={e => setNewBatch({...newBatch, name: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>

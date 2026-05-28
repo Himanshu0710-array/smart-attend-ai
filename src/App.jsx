@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SessionProvider } from './contexts/SessionContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -23,8 +24,9 @@ function DashboardRedirect() {
 
 function App() {
   return (
-    <AuthProvider>
-      <SessionProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <SessionProvider>
       <Router>
         <Routes>
           {/* Public Routes */}
@@ -111,9 +113,10 @@ function App() {
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Router>
-      </SessionProvider>
-    </AuthProvider>
+        </Router>
+        </SessionProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

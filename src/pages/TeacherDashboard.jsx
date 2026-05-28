@@ -376,7 +376,7 @@ export default function TeacherDashboard() {
           ========================================================================= */}
       {activeTab === 'students' && (
         <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="pro-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Users className="w-6 h-6 text-blue-500" /> Manage Students
@@ -388,7 +388,7 @@ export default function TeacherDashboard() {
             </button>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+          <div className="pro-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
@@ -457,7 +457,7 @@ export default function TeacherDashboard() {
             })}
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+          <div className="pro-card p-6">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex justify-between items-center">
               <span>Session Control</span>
               {!activeSession && (
@@ -520,7 +520,7 @@ export default function TeacherDashboard() {
             )}
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+          <div className="pro-card p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 <Eye className="w-5 h-5 text-blue-500" />
@@ -594,7 +594,7 @@ export default function TeacherDashboard() {
           ========================================================================= */}
       {activeTab === 'history' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+          <div className="lg:col-span-1 pro-card p-4">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Past Sessions</h2>
             {historySessions.length === 0 ? (
               <p className="text-slate-500 text-sm">No historical sessions found.</p>
@@ -618,7 +618,7 @@ export default function TeacherDashboard() {
             )}
           </div>
 
-          <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+          <div className="lg:col-span-2 pro-card p-6">
             {!selectedHistorySession ? (
               <div className="text-center py-12 text-slate-400">
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -697,7 +697,7 @@ export default function TeacherDashboard() {
           ========================================================================= */}
       {activeTab === 'reports' && (
         <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+          <div className="pro-card p-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
               <PieChart className="w-6 h-6 text-indigo-500" /> Attendance Reports
             </h2>

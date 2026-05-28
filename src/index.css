@@ -1,8 +1,9 @@
 @import "tailwindcss";
+@custom-variant dark (&:is(.dark *));
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+    @apply bg-slate-50 text-slate-900 font-sans antialiased transition-colors duration-200;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
@@ -16,9 +17,10 @@
   @apply transition-transform duration-200 hover:scale-[1.02];
 }
 
-.glass-effect {
-  @apply bg-white/70 backdrop-blur-md border border-slate-200/50 shadow-lg;
+/* Professional solid card styles replacing the old glass-effect */
+.pro-card {
+  @apply bg-white border border-slate-200 shadow-sm rounded-2xl transition-all duration-200;
 }
-.dark .glass-effect {
-  @apply bg-slate-900/70 border-slate-800/50;
+.dark .pro-card {
+  @apply bg-slate-900 border-slate-800 shadow-none;
 }
