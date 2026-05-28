@@ -27,6 +27,15 @@ export const login = async (email, password) => {
   return res;
 };
 
+export const signup = async (userData) => {
+  const res = await request('/auth/signup', { method: 'POST', body: JSON.stringify(userData) });
+  if (res.token) {
+    localStorage.setItem('smartattend_token', res.token);
+    localStorage.setItem('smartattend_user', JSON.stringify(res.user));
+  }
+  return res;
+};
+
 export const logout = () => {
   localStorage.removeItem('smartattend_token');
   localStorage.removeItem('smartattend_user');

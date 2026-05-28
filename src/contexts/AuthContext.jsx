@@ -43,10 +43,22 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
+  async function signup(email, password, role, additionalData) {
+    try {
+      const response = await api.signup({ email, password, role, ...additionalData });
+      setCurrentUser(response.user);
+      setUserData(response.user);
+      return response;
+    } catch (error) {
+      throw new Error(error.error || 'Failed to create account');
+    }
+  }
+
   const value = {
     currentUser,
     userData,
     login,
+    signup,
     logout,
     isDemoMode: false, // Demo mode is fully disabled now
   };

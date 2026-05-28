@@ -93,6 +93,40 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { name, email, role, password, rollNumber, batch, branch, section } = req.body;
+    
+    if (role === 'admin') return res.status(403).json({ error: 'Cannot register as admin' });
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ error: 'Email already exists' });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const user = new User({
+      uid: new mongoose.Types.ObjectId().toString(),
+      name, email, role, password: hashedPassword, rollNumber, batch, branch, section
+    });
+    
+    await user.save();
+
+    const token = jwt.sign(
+      { uid: user.uid, role: user.role, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const userData = user.toObject();
+    delete userData.password;
+
+    res.json({ token, user: userData });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ========= ADMIN ROUTES =========
 
 // Users
