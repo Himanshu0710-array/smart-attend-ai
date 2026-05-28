@@ -42,23 +42,33 @@ app.use(cors({
 app.use(express.json());
 
 // ========= DATABASE CONNECTION & SEEDING =========
+let lastDbError = null;
+
 async function connectWithRetry(retries = 5, delay = 3000) {
+  // Log the URI host for debugging (hide password)
+  const uri = process.env.MONGODB_URI || '';
+  const hostMatch = uri.match(/@([^/]+)/);
+  console.log(`🔗 MongoDB host: ${hostMatch ? hostMatch[1] : 'unknown'}`);
+  console.log(`🔗 Full URI length: ${uri.length} chars`);
+
   for (let i = 1; i <= retries; i++) {
     try {
       console.log(`🔄 MongoDB connection attempt ${i}/${retries}...`);
-      await mongoose.connect(process.env.MONGODB_URI, {
-        serverSelectionTimeoutMS: 10000,
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 15000,
       });
       console.log('✅ Connected to MongoDB Atlas');
+      lastDbError = null;
       await seedAdmin();
       await seedTimetableData();
       return;
     } catch (err) {
+      lastDbError = err.message;
       console.error(`❌ MongoDB attempt ${i} failed:`, err.message);
       if (i < retries) {
         console.log(`⏳ Retrying in ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
-        delay *= 1.5; // increase delay each retry
+        delay *= 1.5;
       }
     }
   }
@@ -624,15 +634,29 @@ app.get('/api/debug/status', async (req, res) => {
     // DB not connected
   }
   
+  // Show the host part of the URI for debugging
+  const uri = process.env.MONGODB_URI || '';
+  const hostMatch = uri.match(/@([^?]+)/);
+
   res.json({
     database: dbStates[dbState] || 'unknown',
+    lastDbError,
     mongoUri: process.env.MONGODB_URI ? 'SET (hidden)' : 'NOT SET',
+    mongoHost: hostMatch ? hostMatch[1] : 'unknown',
     jwtSecret: process.env.JWT_SECRET ? 'SET' : 'NOT SET',
     frontendUrl: process.env.FRONTEND_URL || 'NOT SET',
     userCount,
     adminExists,
     nodeEnv: process.env.NODE_ENV || 'not set'
   });
+});
+
+// Force reconnect endpoint
+app.get('/api/debug/reconnect', async (req, res) => {
+  res.json({ message: 'Reconnecting to MongoDB...' });
+  // Disconnect first if in a bad state
+  try { await mongoose.disconnect(); } catch(e) {}
+  connectWithRetry();
 });
 
 const PORT = process.env.PORT || 3001;
