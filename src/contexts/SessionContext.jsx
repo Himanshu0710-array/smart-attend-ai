@@ -8,9 +8,9 @@ export function useSession() {
 
 // Demo classroom data
 const DEMO_CLASSROOMS = [
-  { id: 'cls-1', name: 'Data Structures', section: 'A', semester: '4th', room: 'Room 301', teacher: 'Dr. Sarah Williams', lat: 28.6139, lon: 77.2090, radius: 100 },
-  { id: 'cls-2', name: 'Operating Systems', section: 'A', semester: '4th', room: 'Room 205', teacher: 'Dr. Sarah Williams', lat: 28.6150, lon: 77.2100, radius: 80 },
-  { id: 'cls-3', name: 'Computer Networks', section: 'B', semester: '4th', room: 'Room 102', teacher: 'Prof. Kumar', lat: 28.6125, lon: 77.2075, radius: 120 },
+  { id: 'cls-1', name: 'Data Structures', section: 'A', semester: '4th', room: 'Room 301', teacher: 'Dr. Sarah Williams', lat: 28.6139, lon: 77.2090, radius: 55 },
+  { id: 'cls-2', name: 'Operating Systems', section: 'A', semester: '4th', room: 'Room 205', teacher: 'Dr. Sarah Williams', lat: 28.6150, lon: 77.2100, radius: 55 },
+  { id: 'cls-3', name: 'Computer Networks', section: 'B', semester: '4th', room: 'Room 102', teacher: 'Prof. Kumar', lat: 28.6125, lon: 77.2075, radius: 55 },
 ];
 
 // All demo students
