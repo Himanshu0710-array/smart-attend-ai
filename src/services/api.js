@@ -59,8 +59,9 @@ export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { met
 // Attendance
 export const getAttendance = (sessionId) => request(`/attendance/${sessionId}`);
 export const getSessionRecords = (sessionId) => request(`/attendance/${sessionId}`);
-export const markAttendance = (sessionId, studentUid, distance, isLate) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, distance, isLate }) });
+export const markAttendance = (sessionId, studentUid, distance, isLate, deviceFingerprint) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, distance, isLate, deviceFingerprint }) });
 export const reverifyAttendance = (sessionId, studentUid, isInsideGeofence, distance) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, isInsideGeofence, distance }) });
+export const overrideAttendance = (sessionId, studentUid, newStatus) => request('/attendance/override', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, newStatus }) });
 
 // History & Reports
 export const getStudentHistory = (studentUid) => request(`/history/${studentUid}`);
@@ -81,3 +82,7 @@ export const updatePassword = (uid, oldPassword, newPassword) => request(`/users
 export const createNotice = (data) => request('/notices', { method: 'POST', body: JSON.stringify(data) });
 export const getNotices = (batch = '', uid = '') => request(`/notices?batch=${encodeURIComponent(batch)}&uid=${encodeURIComponent(uid)}`);
 export const getLowAttendanceStudents = () => request('/teacher/low-attendance');
+
+// Device Security
+export const verifyDeviceFingerprint = (deviceFingerprint, studentUid) => request('/auth/verify-device', { method: 'POST', body: JSON.stringify({ deviceFingerprint, studentUid }) });
+export const resetDeviceFingerprint = (studentUid) => request(`/admin/users/${studentUid}/reset-device`, { method: 'POST' });

@@ -17,6 +17,45 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Generate a stable device fingerprint for anti-proxy detection
+function getDeviceFingerprint() {
+  const cached = localStorage.getItem('smartattend_device_fp');
+  if (cached) return cached;
+
+  try {
+    // Combine multiple browser/device signals
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillText('SmartAttend-FP', 2, 2);
+    const canvasData = canvas.toDataURL();
+
+    const signals = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width + 'x' + screen.height,
+      screen.colorDepth,
+      new Date().getTimezoneOffset(),
+      navigator.hardwareConcurrency || 'unknown',
+      canvasData.substring(0, 100),
+    ].join('|');
+
+    // Simple hash
+    let hash = 0;
+    for (let i = 0; i < signals.length; i++) {
+      const char = signals.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    const fp = 'fp-' + Math.abs(hash).toString(36);
+    localStorage.setItem('smartattend_device_fp', fp);
+    return fp;
+  } catch {
+    return 'fp-unknown';
+  }
+}
+
 export default function MarkAttendance() {
   const { userData } = useAuth();
   // Use batch for new students, fallback to section for legacy students
@@ -27,6 +66,7 @@ export default function MarkAttendance() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [location, setLocation] = useState(null);
   const [locationError, setLocationError] = useState('');
+  const [deviceError, setDeviceError] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [distance, setDistance] = useState(null);
@@ -74,6 +114,22 @@ export default function MarkAttendance() {
     if (!selectedSession) return;
     setLoading(true);
     setLocationError('');
+    setDeviceError('');
+
+    // Proactively check device fingerprint first
+    try {
+      const fp = getDeviceFingerprint();
+      const res = await api.verifyDeviceFingerprint(fp, studentUid);
+      if (!res.valid) {
+        setDeviceError(res.message);
+        setCheckResult('device_error');
+        setLoading(false);
+        return; // Abort attendance flow
+      }
+    } catch (e) {
+      console.warn('Could not verify device fingerprint', e);
+      // Fail open if server error or keep going? We'll keep going and let markAttendance catch it if needed
+    }
 
     if (!navigator.geolocation) {
       setLocationError('Geolocation is not supported by your browser');
@@ -91,13 +147,13 @@ export default function MarkAttendance() {
         setLastChecked(new Date());
 
         const isInside = dist <= selectedSession.radius;
-        setCheckResult(isInside ? 'inside' : 'outside');
 
         try {
           if (isInside) {
             if (myStatus === 'Absent' || !myStatus) {
               const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
-              await api.markAttendance(selectedSession.id, studentUid, dist, elapsed > 10);
+              const fp = getDeviceFingerprint();
+              await api.markAttendance(selectedSession.id, studentUid, dist, elapsed > 10, fp);
             } else {
               await api.reverifyAttendance(selectedSession.id, studentUid, true, dist);
             }
@@ -109,8 +165,11 @@ export default function MarkAttendance() {
           // Re-fetch status
           const records = await api.getSessionRecords(selectedSession.id);
           setMyStatus(records[studentUid]?.status || 'Absent');
+          setCheckResult(isInside ? 'inside' : 'outside');
         } catch (e) {
           console.error('Failed to update attendance:', e);
+          setDeviceError(e.error || 'Failed to communicate with server.');
+          setCheckResult('device_error');
         }
 
         setLoading(false);
@@ -216,7 +275,7 @@ export default function MarkAttendance() {
         </div>
       )}
 
-      {locationError && (
+      {locationError && !checkResult && (
         <div className="p-5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center">
           <XCircle className="w-10 h-10 text-red-500 mx-auto mb-3" />
           <p className="font-medium text-red-700 dark:text-red-300">{locationError}</p>
@@ -254,8 +313,21 @@ export default function MarkAttendance() {
           </div>
           <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">Outside Classroom Area</h3>
           <p className="text-red-600 dark:text-red-400 text-sm">You are {distance}m away (allowed: {selectedSession?.radius}m)</p>
-          <button onClick={checkLocation} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
+          <button onClick={() => { setCheckResult(null); checkLocation(); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Check Again
+          </button>
+        </div>
+      )}
+
+      {checkResult === 'device_error' && (
+        <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center animate-in zoom-in-95">
+          <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
+            <ShieldCheck className="w-10 h-10 text-red-600 dark:text-red-400" />
+          </div>
+          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">Proxy Detected / Device Mismatch</h3>
+          <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed max-w-md mx-auto">{deviceError}</p>
+          <button onClick={() => setCheckResult(null)} className="mt-6 px-6 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30">
+            Acknowledge
           </button>
         </div>
       )}

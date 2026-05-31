@@ -128,11 +128,47 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Check if a device fingerprint is valid for a student
+app.post('/api/auth/verify-device', requireAuth, async (req, res) => {
+  try {
+    const { deviceFingerprint, studentUid } = req.body;
+    if (!deviceFingerprint || !studentUid) return res.status(400).json({ error: 'Missing params' });
+
+    const student = await User.findOne({ uid: studentUid });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    // 1. If student already has a bound device, it MUST match
+    if (student.deviceFingerprint && student.deviceFingerprint !== deviceFingerprint) {
+      return res.json({ 
+        valid: false, 
+        message: '⚠️ Device Mismatch: You are trying to mark attendance from an unregistered device. Please use your primary registered device.' 
+      });
+    }
+
+    // 2. Check if this device is already bound to ANY OTHER student
+    const deviceOwner = await User.findOne({ deviceFingerprint, role: 'student' });
+    if (deviceOwner && deviceOwner.uid !== studentUid) {
+      return res.json({ 
+        valid: false, 
+        message: '🚨 PROXY DETECTED: This device is already registered to another student. You cannot mark attendance for multiple students from the same device.' 
+      });
+    }
+
+    // Device is safe to use (either already theirs, or brand new)
+    res.json({ valid: true, message: 'Device verified.' });
+  } catch (error) {
+    console.error('Verify device error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, role, password, rollNumber, batch, branch, section } = req.body;
     
+    // SECURITY: Block student and admin self-registration
     if (role === 'admin') return res.status(403).json({ error: 'Cannot register as admin' });
+    if (role === 'student') return res.status(403).json({ error: 'Student accounts must be created by a teacher or admin. Please contact your teacher.' });
 
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ error: 'Email already exists' });
@@ -186,6 +222,12 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ error: 'Email already exists' });
 
+    // SECURITY: Check for duplicate roll number
+    if (rollNumber) {
+      const duplicateRoll = await User.findOne({ rollNumber });
+      if (duplicateRoll) return res.status(400).json({ error: `Roll number ${rollNumber} is already assigned to ${duplicateRoll.name}` });
+    }
+
     const hashedPassword = await bcrypt.hash(password || 'password123', 10);
     const uid = `user-${Date.now()}`;
 
@@ -198,6 +240,10 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
     delete userResponse.password;
     res.json(userResponse);
   } catch (error) {
+    console.error('Create user error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ error: 'Duplicate entry: email or roll number already exists' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -219,6 +265,30 @@ app.delete('/api/admin/users/:uid', requireAuth, requireAdmin, async (req, res) 
     await User.findOneAndDelete({ uid: req.params.uid });
     res.json({ success: true });
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Reset student device fingerprint
+app.post('/api/admin/users/:uid/reset-device', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+       return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const { uid } = req.params;
+    const user = await User.findOneAndUpdate(
+      { uid, role: 'student' },
+      { $unset: { deviceFingerprint: 1 } },
+      { new: true }
+    );
+    
+    if (!user) return res.status(404).json({ error: 'Student not found' });
+    
+    console.log(`🔓 Device fingerprint reset for ${user.name} by ${req.user.email}`);
+    res.json({ success: true, message: 'Device fingerprint reset successfully' });
+  } catch (error) {
+    console.error('Reset device error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -325,14 +395,39 @@ app.delete('/api/sessions/:sessionId', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Only teachers can end sessions' });
     const { sessionId } = req.params;
-    const session = await Session.findOneAndUpdate(
-      { id: sessionId },
-      { status: 'ended', endTime: new Date().toISOString() },
-      { new: true }
-    );
+    const session = await Session.findOne({ id: sessionId });
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    res.json({ success: true });
+
+    // Calculate session duration in minutes
+    const sessionStart = new Date(session.startTime);
+    const sessionEnd = new Date();
+    const durationMinutes = (sessionEnd - sessionStart) / 60000;
+    const REVERIFY_INTERVAL = 20; // minutes
+    const expectedChecks = Math.max(1, Math.floor(durationMinutes / REVERIFY_INTERVAL));
+
+    // Evaluate final attendance for all students in this session
+    const records = await Attendance.find({ sessionId });
+    for (const record of records) {
+      if (record.status === 'Absent') continue; // Stay absent
+      if (record.status === 'Left Early') continue; // Already penalized
+
+      // Check if student completed enough reverifications
+      const actualChecks = record.reverifications || 0;
+      if (expectedChecks > 1 && actualChecks < Math.ceil(expectedChecks * 0.5)) {
+        record.status = 'Partial';
+        await record.save();
+      }
+    }
+
+    // End the session
+    session.status = 'ended';
+    session.endTime = sessionEnd.toISOString();
+    await session.save();
+
+    console.log(`📊 Session ended: ${session.className} | Duration: ${Math.round(durationMinutes)}min | Expected checks: ${expectedChecks}`);
+    res.json({ success: true, evaluation: { durationMinutes: Math.round(durationMinutes), expectedChecks } });
   } catch (error) {
+    console.error('End session error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -352,10 +447,34 @@ app.get('/api/attendance/:sessionId', requireAuth, async (req, res) => {
 app.post('/api/attendance/mark', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'student') return res.status(403).json({ error: 'Only students can mark attendance' });
-    const { sessionId, studentUid, distance, isLate } = req.body;
+    const { sessionId, studentUid, distance, isLate, deviceFingerprint } = req.body;
     
     // Extra security check to prevent students from marking other students
     if (req.user.uid !== studentUid) return res.status(403).json({ error: 'Cannot mark attendance for another student' });
+
+    // SECURITY: Device fingerprint binding
+    if (deviceFingerprint) {
+      const student = await User.findOne({ uid: studentUid });
+      if (student) {
+        if (!student.deviceFingerprint) {
+          // Check if ANY other student already bound this device globally
+          const deviceOwner = await User.findOne({ deviceFingerprint, role: 'student' });
+          if (deviceOwner && deviceOwner.uid !== studentUid) {
+             console.warn(`🚨 GLOBAL PROXY DETECTED: Device ${deviceFingerprint.substring(0, 16)} is already bound to ${deviceOwner.name}`);
+             return res.status(403).json({ error: 'This device is already registered to another student. You cannot mark attendance for multiple students from the same device.' });
+          }
+
+          // First time — bind this device to the student
+          student.deviceFingerprint = deviceFingerprint;
+          await student.save();
+          console.log(`🔒 Device bound to ${student.name}: ${deviceFingerprint.substring(0, 16)}...`);
+        } else if (student.deviceFingerprint !== deviceFingerprint) {
+          // Different device — reject
+          console.warn(`⚠️ Device mismatch for ${student.name}: expected ${student.deviceFingerprint.substring(0, 16)}, got ${deviceFingerprint.substring(0, 16)}`);
+          return res.status(403).json({ error: 'Attendance must be marked from your registered device. Contact your teacher if you changed devices.' });
+        }
+      }
+    }
 
     const record = await Attendance.findOneAndUpdate(
       { sessionId, studentUid },
@@ -371,6 +490,7 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
     if (!record) return res.status(404).json({ error: 'Record not found' });
     res.json(record);
   } catch (error) {
+    console.error('Mark attendance error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -395,6 +515,35 @@ app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
       }
     }
     await record.save();
+    res.json(record);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Teacher manual attendance override (for Partial/Absent students)
+app.post('/api/attendance/override', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only teachers can override attendance' });
+    }
+    const { sessionId, studentUid, newStatus } = req.body;
+    const allowedStatuses = ['Present', 'Absent', 'Late Entry', 'Left Early', 'Partial'];
+    if (!allowedStatuses.includes(newStatus)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const record = await Attendance.findOneAndUpdate(
+      { sessionId, studentUid },
+      { 
+        status: newStatus,
+        markedAt: newStatus === 'Present' ? new Date().toISOString() : undefined,
+      },
+      { new: true }
+    );
+    if (!record) return res.status(404).json({ error: 'Record not found' });
+
+    console.log(`✏️ Teacher override: ${record.studentName} → ${newStatus} (by ${req.user.email})`);
     res.json(record);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });

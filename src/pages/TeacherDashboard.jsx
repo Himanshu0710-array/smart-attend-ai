@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
 import {
   Users, Play, Square, Clock, CheckCircle, XCircle, AlertTriangle,
-  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save, PieChart
+  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save, PieChart, UserCheck, AlertCircle
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -12,6 +12,7 @@ const statusStyles = {
   'Absent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   'Late Entry': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   'Left Early': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  'Partial': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
 };
 
 const statusIcons = {
@@ -19,6 +20,7 @@ const statusIcons = {
   'Absent': XCircle,
   'Late Entry': Clock,
   'Left Early': AlertTriangle,
+  'Partial': AlertCircle,
 };
 
 
@@ -39,6 +41,7 @@ export default function TeacherDashboard() {
   const [historySessions, setHistorySessions] = useState([]);
   const [selectedHistorySession, setSelectedHistorySession] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyDateFilter, setHistoryDateFilter] = useState('');
 
   // Timetable State
   const [timetableData, setTimetableData] = useState({});
@@ -247,6 +250,18 @@ export default function TeacherDashboard() {
   const absent = studentList.filter(s => s.status === 'Absent').length;
   const late = studentList.filter(s => s.status === 'Late Entry').length;
   const left = studentList.filter(s => s.status === 'Left Early').length;
+  const partial = studentList.filter(s => s.status === 'Partial').length;
+
+  async function handleOverride(studentUid, newStatus) {
+    if (!activeSession) return;
+    try {
+      await api.overrideAttendance(activeSession.id, studentUid, newStatus);
+      fetchRecords();
+    } catch (e) {
+      console.error('Override failed:', e);
+      alert('Failed to override attendance');
+    }
+  }
 
   async function handleStartSession() {
     setLoading(true);
@@ -408,6 +423,7 @@ export default function TeacherDashboard() {
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Roll Number</th>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Batch / Section</th>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Branch</th>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -427,11 +443,29 @@ export default function TeacherDashboard() {
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                         {student.branch || '-'}
                       </td>
+                      <td className="py-3 px-4 text-right">
+                        <button 
+                          onClick={async () => {
+                            if (window.confirm(`Are you sure you want to reset the bound device for ${student.name}? They will be able to mark attendance from a new device next time.`)) {
+                              try {
+                                await api.resetDeviceFingerprint(student.uid);
+                                alert(`Device fingerprint reset for ${student.name}`);
+                              } catch (e) {
+                                console.error('Reset device error payload:', e);
+                                alert(`Failed to reset device: ${e.error || e.message || JSON.stringify(e)}`);
+                              }
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors inline-flex items-center gap-1"
+                        >
+                          Reset Device
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {studentListForTeacher.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-12 text-center text-slate-500">
+                      <td colSpan={5} className="py-12 text-center text-slate-500">
                         No students found. Register some students above!
                       </td>
                     </tr>
@@ -448,12 +482,13 @@ export default function TeacherDashboard() {
           ========================================================================= */}
       {activeTab === 'live' && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
               { label: 'Present', value: present, icon: CheckCircle, bg: 'bg-emerald-50 dark:bg-emerald-900/20', iconColor: 'from-emerald-500 to-emerald-600' },
               { label: 'Absent', value: absent, icon: XCircle, bg: 'bg-red-50 dark:bg-red-900/20', iconColor: 'from-red-500 to-red-600' },
               { label: 'Late Entry', value: late, icon: Clock, bg: 'bg-amber-50 dark:bg-amber-900/20', iconColor: 'from-amber-500 to-orange-600' },
               { label: 'Left Early', value: left, icon: AlertTriangle, bg: 'bg-orange-50 dark:bg-orange-900/20', iconColor: 'from-orange-500 to-orange-600' },
+              { label: 'Partial', value: partial, icon: AlertCircle, bg: 'bg-purple-50 dark:bg-purple-900/20', iconColor: 'from-purple-500 to-purple-600' },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
@@ -563,6 +598,7 @@ export default function TeacherDashboard() {
                       <th className="text-left py-3 px-3 text-sm font-medium text-slate-500 dark:text-slate-400">Status</th>
                       <th className="text-left py-3 px-3 text-sm font-medium text-slate-500 dark:text-slate-400">Time</th>
                       <th className="text-left py-3 px-3 text-sm font-medium text-slate-500 dark:text-slate-400">Distance</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium text-slate-500 dark:text-slate-400">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -589,6 +625,21 @@ export default function TeacherDashboard() {
                             {student.markedAt ? new Date(student.markedAt).toLocaleTimeString() : '-'}
                           </td>
                           <td className="py-3 px-3 text-sm text-slate-500 dark:text-slate-400">{student.distance || '-'}</td>
+                          <td className="py-3 px-3">
+                            {(student.status === 'Absent' || student.status === 'Partial' || student.status === 'Left Early') && (
+                              <button
+                                onClick={() => handleOverride(student.studentUid || student.uid, 'Present')}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                                title="Manually mark as Present"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                                Mark Present
+                              </button>
+                            )}
+                            {student.status === 'Present' && (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -607,11 +658,38 @@ export default function TeacherDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1 pro-card p-4">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Past Sessions</h2>
+            
+            {/* Date Filter */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Filter by Date</label>
+              <input
+                type="date"
+                value={historyDateFilter}
+                onChange={(e) => setHistoryDateFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
+              />
+              {historyDateFilter && (
+                <button 
+                  onClick={() => setHistoryDateFilter('')}
+                  className="mt-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
+
             {historySessions.length === 0 ? (
               <p className="text-slate-500 text-sm">No historical sessions found.</p>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                {historySessions.map(session => (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                {historySessions
+                  .filter(session => {
+                    if (!historyDateFilter) return true;
+                    // Compare the session date with the filter date
+                    const sessionDate = new Date(session.startTime).toLocaleDateString('en-CA'); // YYYY-MM-DD
+                    return sessionDate === historyDateFilter;
+                  })
+                  .map(session => (
                   <button
                     key={session.sessionId}
                     onClick={() => setSelectedHistorySession(session)}
@@ -625,6 +703,13 @@ export default function TeacherDashboard() {
                     <p className="text-xs text-slate-500 mt-1">{session.date} • {new Date(session.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                   </button>
                 ))}
+                {historySessions.filter(session => {
+                  if (!historyDateFilter) return true;
+                  const sessionDate = new Date(session.startTime).toLocaleDateString('en-CA');
+                  return sessionDate === historyDateFilter;
+                }).length === 0 && (
+                  <p className="text-slate-500 text-sm text-center py-4">No sessions found for this date.</p>
+                )}
               </div>
             )}
           </div>
@@ -672,6 +757,7 @@ export default function TeacherDashboard() {
                         <th className="text-left py-3 px-3 text-sm font-medium text-slate-500">Student</th>
                         <th className="text-left py-3 px-3 text-sm font-medium text-slate-500">Roll No.</th>
                         <th className="text-left py-3 px-3 text-sm font-medium text-slate-500">Status</th>
+                        <th className="text-left py-3 px-3 text-sm font-medium text-slate-500">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -691,6 +777,35 @@ export default function TeacherDashboard() {
                                   <Icon className="w-3.5 h-3.5" />
                                   {student.status}
                                 </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                {(student.status === 'Absent' || student.status === 'Partial' || student.status === 'Left Early') && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        await api.overrideAttendance(selectedHistorySession.sessionId, student.uid, 'Present');
+                                        // Update local state immediately
+                                        setSelectedHistorySession(prev => ({
+                                          ...prev,
+                                          records: prev.records.map(r =>
+                                            r.uid === student.uid ? { ...r, status: 'Present' } : r
+                                          )
+                                        }));
+                                      } catch (e) {
+                                        console.error('Override failed:', e);
+                                        alert('Failed to override attendance');
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                                    title="Manually mark as Present"
+                                  >
+                                    <UserCheck className="w-3.5 h-3.5" />
+                                    Mark Present
+                                  </button>
+                                )}
+                                {(student.status === 'Present' || student.status === 'Late Entry') && (
+                                  <span className="text-xs text-slate-400">—</span>
+                                )}
                               </td>
                             </tr>
                           );
