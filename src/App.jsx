@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SessionProvider } from './contexts/SessionContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { ToastProvider } from './contexts/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -26,6 +27,7 @@ function DashboardRedirect() {
 function App() {
   return (
     <ThemeProvider>
+      <ToastProvider>
       <AuthProvider>
         <SessionProvider>
       <Router>
@@ -114,6 +116,7 @@ function App() {
         </Router>
         </SessionProvider>
       </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

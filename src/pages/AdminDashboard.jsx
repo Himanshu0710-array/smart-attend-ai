@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
+import { useToast } from '../contexts/ToastContext';
+import BulkImportModal from '../components/BulkImportModal';
 import {
   Users, UserPlus, MapPin, BarChart3, Search,
-  Pencil, Trash2, GraduationCap, Building2
+  Pencil, Trash2, GraduationCap, Building2, FileSpreadsheet
 } from 'lucide-react';
 
 export default function AdminDashboard() {
   const { userData } = useAuth();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -17,6 +20,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   // Modals state
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'student', rollNumber: '', section: '', branch: '', batch: '' });
   
@@ -49,11 +53,12 @@ export default function AdminDashboard() {
     e.preventDefault();
     try {
       await api.createUser(newUser);
+      toast.success('User created successfully!');
       setShowUserModal(false);
       setNewUser({ name: '', email: '', password: '', role: 'student', section: '', rollNumber: '' });
       fetchData();
     } catch (e) {
-      alert(e.error || 'Failed to create user');
+      toast.error(e.error || 'Failed to create user');
     }
   };
 
@@ -61,11 +66,12 @@ export default function AdminDashboard() {
     e.preventDefault();
     try {
       await api.updateUser(editUser.uid, editUser);
+      toast.success('User updated successfully!');
       setShowEditUserModal(false);
       setEditUser(null);
       fetchData();
     } catch (e) {
-      alert(e.error || 'Failed to update user');
+      toast.error(e.error || 'Failed to update user');
     }
   };
 
@@ -74,14 +80,14 @@ export default function AdminDashboard() {
     setShowEditUserModal(true);
   };
 
-  const handleDeleteUser = async (uid) => {
-    if(window.confirm('Delete this user?')) {
-      try {
-        await api.deleteUser(uid);
-        fetchData();
-      } catch (e) {
-        alert('Failed to delete user');
-      }
+  const handleDeleteUser = async (uid, name) => {
+    if (!window.confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+    try {
+      await api.deleteUser(uid);
+      toast.success('User deleted.');
+      fetchData();
+    } catch (e) {
+      toast.error('Failed to delete user');
     }
   };
 
@@ -90,22 +96,23 @@ export default function AdminDashboard() {
     try {
       const b = { ...newBatch, section: newBatch.name };
       await api.createBatch(b);
+      toast.success('Batch created!');
       setShowBatchModal(false);
       setNewBatch({ name: '', room: '', teacher: '', lat: 26.8529, lon: 75.7841, radius: 50 });
       fetchData();
     } catch (e) {
-      alert(e.error || 'Failed to create batch');
+      toast.error(e.error || 'Failed to create batch');
     }
   };
 
-  const handleDeleteBatch = async (id) => {
-    if(window.confirm('Delete this batch?')) {
-      try {
-        await api.deleteBatch(id);
-        fetchData();
-      } catch (e) {
-        alert('Failed to delete batch');
-      }
+  const handleDeleteBatch = async (id, name) => {
+    if (!window.confirm(`Delete batch "${name}"?`)) return;
+    try {
+      await api.deleteBatch(id);
+      toast.success('Batch deleted.');
+      fetchData();
+    } catch (e) {
+      toast.error('Failed to delete batch');
     }
   };
 
@@ -200,10 +207,16 @@ export default function AdminDashboard() {
                 <option value="admin">Admins</option>
               </select>
             </div>
-            <button onClick={() => setShowUserModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5 hover:shadow-md transition-shadow">
-              <UserPlus className="w-4 h-4" />
-              Add User
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowBulkModal(true)} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5 hover:shadow-md transition-shadow">
+                <FileSpreadsheet className="w-4 h-4" />
+                Import CSV
+              </button>
+              <button onClick={() => setShowUserModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-sm font-medium rounded-lg flex items-center gap-1.5 hover:shadow-md transition-shadow">
+                <UserPlus className="w-4 h-4" />
+                Add User
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -243,7 +256,7 @@ export default function AdminDashboard() {
                         <button onClick={() => openEditModal(user)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-blue-500 transition-colors">
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDeleteUser(user.uid)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
+                        <button onClick={() => handleDeleteUser(user.uid, user.name)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -273,7 +286,7 @@ export default function AdminDashboard() {
                     <Building2 className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleDeleteBatch(room.id)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => handleDeleteBatch(room.id, room.name)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -409,6 +422,14 @@ export default function AdminDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkModal && (
+        <BulkImportModal
+          onClose={() => setShowBulkModal(false)}
+          onSuccess={() => { setShowBulkModal(false); fetchData(); }}
+        />
       )}
 
     </div>

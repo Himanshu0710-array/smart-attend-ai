@@ -69,6 +69,10 @@ export const getTeacherHistory = (teacherName) => request(`/teacher/history/${te
 export const getTeacherReports = (filters) => request('/teacher/reports', { method: 'POST', body: JSON.stringify(filters) });
 export const createStudentByTeacher = (studentData) => request('/admin/users', { method: 'POST', body: JSON.stringify({ ...studentData, role: 'student' }) });
 export const getTeacherStudents = () => request('/teacher/students');
+export const bulkCreateStudents = (students) => request('/admin/users/bulk', { method: 'POST', body: JSON.stringify({ students }) });
+export const resetStudentPassword = (uid, newPassword) => request(`/teacher/students/${uid}/reset-password`, { method: 'POST', body: JSON.stringify({ newPassword }) });
+export const updateStudentByTeacher = (uid, data) => request(`/teacher/students/${uid}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteStudentByTeacher = (uid) => request(`/teacher/students/${uid}`, { method: 'DELETE' });
 
 // Timetable
 export const getTimetable = () => request('/timetable');

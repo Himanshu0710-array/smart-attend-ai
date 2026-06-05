@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
+import BulkImportModal from '../components/BulkImportModal';
+import { useToast } from '../contexts/ToastContext';
 import {
-  Users, Play, Square, Clock, CheckCircle, XCircle, AlertTriangle,
-  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save, PieChart, UserCheck, AlertCircle
+  Users, Play, Square, Clock, CheckCircle, XCircle, AlertTriangle, Loader2,
+  Eye, FileSpreadsheet, FileText, RefreshCw, MapPin, Search, Calendar as CalendarIcon, Download, Edit3, X, Save, PieChart, UserCheck, AlertCircle, Pencil, Trash2, KeyRound
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,6 +28,7 @@ const statusIcons = {
 
 export default function TeacherDashboard() {
   const { userData } = useAuth();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('live'); // 'live', 'history', 'timetable'
 
   // Live Session State
@@ -55,9 +58,18 @@ export default function TeacherDashboard() {
 
   // Students State
   const [showStudentModal, setShowStudentModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [studentListForTeacher, setStudentListForTeacher] = useState([]);
+  // Edit student state
+  const [showEditStudentModal, setShowEditStudentModal] = useState(false);
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [isSavingStudent, setIsSavingStudent] = useState(false);
+  // Reset password state
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [resetPasswordStudent, setResetPasswordStudent] = useState(null);
+  const [newPasswordValue, setNewPasswordValue] = useState('');
 
   // Notices State
   const [notices, setNotices] = useState([]);
@@ -172,7 +184,7 @@ export default function TeacherDashboard() {
   const downloadStudentReport = async (student) => {
     try {
       if (!student.uid) {
-        alert("Student ID is missing. Please refresh the report.");
+        toast.error("Student ID is missing. Please refresh the report.");
         return;
       }
       
@@ -235,7 +247,7 @@ export default function TeacherDashboard() {
       doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`);
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      alert(`Failed to generate PDF. Error: ${err.message || 'Unknown error'}`);
+      toast.error(`Failed to generate PDF. Error: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -259,7 +271,7 @@ export default function TeacherDashboard() {
       fetchRecords();
     } catch (e) {
       console.error('Override failed:', e);
-      alert('Failed to override attendance');
+      toast.error('Failed to override attendance');
     }
   }
 
@@ -301,10 +313,12 @@ export default function TeacherDashboard() {
     setLoading(true);
     try {
       await api.endSession(activeSession.id);
+      toast.success('Session ended successfully.');
       setActiveSession(null);
       setStudentList([]);
     } catch (e) {
       console.error(e);
+      toast.error('Failed to end session.');
     }
     setLoading(false);
   }
@@ -345,14 +359,68 @@ export default function TeacherDashboard() {
     setIsCreatingStudent(true);
     try {
       await api.createStudentByTeacher(newStudent);
-      alert('Student created successfully!');
+      toast.success('Student created successfully!');
       setShowStudentModal(false);
       setNewStudent({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
       fetchStudents();
     } catch (error) {
-      alert(error.error || 'Failed to create student');
+      toast.error(error.error || 'Failed to create student');
     } finally {
       setIsCreatingStudent(false);
+    }
+  };
+
+  // Handle Edit Student
+  const handleSaveEditStudent = async (e) => {
+    e.preventDefault();
+    setIsSavingStudent(true);
+    try {
+      await api.updateStudentByTeacher(editingStudent.uid, {
+        name: editingStudent.name,
+        email: editingStudent.email,
+        rollNumber: editingStudent.rollNumber,
+        branch: editingStudent.branch,
+        section: editingStudent.section,
+        batch: editingStudent.batch,
+      });
+      toast.success('Student updated successfully!');
+      setShowEditStudentModal(false);
+      setEditingStudent(null);
+      fetchStudents();
+    } catch (error) {
+      toast.error(error.error || 'Failed to update student');
+    } finally {
+      setIsSavingStudent(false);
+    }
+  };
+
+  // Handle Delete Student
+  const handleDeleteStudent = async (student) => {
+    if (!window.confirm(`Delete student "${student.name}"? This will remove their account. Their attendance history will remain.`)) return;
+    try {
+      await api.deleteStudentByTeacher(student.uid);
+      toast.success(`${student.name} removed.`);
+      fetchStudents();
+    } catch (error) {
+      toast.error(error.error || 'Failed to delete student');
+    }
+  };
+
+  // Handle Reset Student Password
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!newPasswordValue || newPasswordValue.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await api.resetStudentPassword(resetPasswordStudent.uid, newPasswordValue);
+      toast.success(`Password reset for ${resetPasswordStudent.name}`);
+      setShowResetPasswordModal(false);
+      setResetPasswordStudent(null);
+      setNewPasswordValue('');
+    } catch (error) {
+      toast.error(error.error || 'Failed to reset password');
     }
   };
 
@@ -409,9 +477,14 @@ export default function TeacherDashboard() {
               </h2>
               <p className="text-sm text-slate-500 mt-1">View and register new students to your classes.</p>
             </div>
-            <button onClick={() => setShowStudentModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow shrink-0">
-              + Register Student
-            </button>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <button onClick={() => setShowBulkModal(true)} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4" /> Import CSV
+              </button>
+              <button onClick={() => setShowStudentModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow shrink-0">
+                + Register Student
+              </button>
+            </div>
           </div>
 
           <div className="pro-card overflow-hidden">
@@ -444,22 +517,42 @@ export default function TeacherDashboard() {
                         {student.branch || '-'}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button 
-                          onClick={async () => {
-                            if (window.confirm(`Are you sure you want to reset the bound device for ${student.name}? They will be able to mark attendance from a new device next time.`)) {
-                              try {
-                                await api.resetDeviceFingerprint(student.uid);
-                                alert(`Device fingerprint reset for ${student.name}`);
-                              } catch (e) {
-                                console.error('Reset device error payload:', e);
-                                alert(`Failed to reset device: ${e.error || e.message || JSON.stringify(e)}`);
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
+                            className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 transition-colors" title="Edit student"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => { setResetPasswordStudent(student); setNewPasswordValue(''); setShowResetPasswordModal(true); }}
+                            className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Reset password"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (window.confirm(`Reset bound device for ${student.name}?`)) {
+                                try {
+                                  await api.resetDeviceFingerprint(student.uid);
+                                  toast.success(`Device reset for ${student.name}`);
+                                } catch (e) {
+                                  toast.error(e.error || 'Failed to reset device');
+                                }
                               }
-                            }
-                          }}
-                          className="px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors inline-flex items-center gap-1"
-                        >
-                          Reset Device
-                        </button>
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                            title="Reset device fingerprint"
+                          >
+                            Reset Device
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStudent(student)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Delete student"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -793,7 +886,7 @@ export default function TeacherDashboard() {
                                         }));
                                       } catch (e) {
                                         console.error('Override failed:', e);
-                                        alert('Failed to override attendance');
+                                        toast.error('Failed to override attendance');
                                       }
                                     }}
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
@@ -1188,7 +1281,7 @@ export default function TeacherDashboard() {
                 const updated = await api.getNotices();
                 setNotices(updated);
               } catch (err) {
-                alert('Failed to send notice');
+                toast.error('Failed to send notice');
               } finally {
                 setIsSendingNotice(false);
               }
@@ -1232,6 +1325,110 @@ export default function TeacherDashboard() {
                 <button type="button" onClick={() => setShowNoticeModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white" disabled={isSendingNotice}>Cancel</button>
                 <button type="submit" disabled={isSendingNotice} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">
                   {isSendingNotice ? 'Sending...' : 'Send Notice'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkModal && (
+        <BulkImportModal
+          onClose={() => setShowBulkModal(false)}
+          onSuccess={() => { setShowBulkModal(false); fetchStudents(); }}
+        />
+      )}
+
+      {/* ── Edit Student Modal ── */}
+      {showEditStudentModal && editingStudent && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-blue-500" /> Edit Student
+              </h2>
+              <button onClick={() => { setShowEditStudentModal(false); setEditingStudent(null); }} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditStudent} className="p-6 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Name</label>
+                <input required value={editingStudent.name} onChange={e => setEditingStudent({...editingStudent, name: e.target.value})}
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+                <input type="email" required value={editingStudent.email} onChange={e => setEditingStudent({...editingStudent, email: e.target.value})}
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Roll Number</label>
+                  <input value={editingStudent.rollNumber || ''} onChange={e => setEditingStudent({...editingStudent, rollNumber: e.target.value})}
+                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Branch</label>
+                  <input value={editingStudent.branch || ''} onChange={e => setEditingStudent({...editingStudent, branch: e.target.value})}
+                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Section</label>
+                  <input value={editingStudent.section || ''} onChange={e => setEditingStudent({...editingStudent, section: e.target.value})}
+                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Batch</label>
+                  <select value={editingStudent.batch || ''} onChange={e => setEditingStudent({...editingStudent, batch: e.target.value})}
+                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    <option value="">No batch</option>
+                    {classrooms.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => { setShowEditStudentModal(false); setEditingStudent(null); }}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium">Cancel</button>
+                <button type="submit" disabled={isSavingStudent}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 flex items-center gap-2">
+                  {isSavingStudent ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset Password Modal ── */}
+      {showResetPasswordModal && resetPasswordStudent && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-amber-500" /> Reset Password
+              </h2>
+              <button onClick={() => { setShowResetPasswordModal(false); setResetPasswordStudent(null); }} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleResetPassword} className="p-6 space-y-4">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Set a new password for <span className="font-semibold text-slate-800 dark:text-slate-200">{resetPasswordStudent.name}</span>. They can change it later from their settings.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">New Password</label>
+                <input type="password" required minLength={6} value={newPasswordValue} onChange={e => setNewPasswordValue(e.target.value)}
+                  placeholder="Min. 6 characters"
+                  className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setShowResetPasswordModal(false); setResetPasswordStudent(null); }}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium">Cancel</button>
+                <button type="submit"
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-medium rounded-lg">
+                  Reset Password
                 </button>
               </div>
             </form>

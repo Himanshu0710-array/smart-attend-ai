@@ -80,16 +80,18 @@ connectWithRetry();
 async function seedAdmin() {
   const adminExists = await User.findOne({ role: 'admin' });
   if (!adminExists) {
-    const hashedPassword = await bcrypt.hash('admin123', 10);
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@smartattend.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@SmartAttend2025!';
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
     const admin = new User({
-      uid: 'admin-001',
+      uid: new mongoose.Types.ObjectId().toString(),
       name: 'Super Admin',
-      email: 'admin@smartattend.com',
+      email: adminEmail,
       password: hashedPassword,
       role: 'admin'
     });
     await admin.save();
-    console.log('🌱 Default Admin Created (admin@smartattend.com / admin123)');
+    console.log(`🌱 Default Admin Created (${adminEmail}) — password from ADMIN_PASSWORD env var`);
   }
 }
 
@@ -106,7 +108,12 @@ async function seedTimetableData() {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+
+    // Input validation
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+    if (typeof email !== 'string' || typeof password !== 'string') return res.status(400).json({ error: 'Invalid input format' });
+
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -165,12 +172,17 @@ app.post('/api/auth/verify-device', requireAuth, async (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, role, password, rollNumber, batch, branch, section } = req.body;
+
+    // Input validation
+    if (!name || !email || !password) return res.status(400).json({ error: 'Name, email, and password are required' });
+    if (!/\S+@\S+\.\S+/.test(email)) return res.status(400).json({ error: 'Invalid email format' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     
     // SECURITY: Block student and admin self-registration
     if (role === 'admin') return res.status(403).json({ error: 'Cannot register as admin' });
     if (role === 'student') return res.status(403).json({ error: 'Student accounts must be created by a teacher or admin. Please contact your teacher.' });
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: email.trim().toLowerCase() });
     if (existingUser) return res.status(400).json({ error: 'Email already exists' });
 
     const salt = await bcrypt.genSalt(10);
@@ -178,7 +190,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
     const user = new User({
       uid: new mongoose.Types.ObjectId().toString(),
-      name, email, role, password: hashedPassword, rollNumber, batch, branch, section
+      name: name.trim(), email: email.trim().toLowerCase(), role, password: hashedPassword, rollNumber, batch, branch, section
     });
     
     await user.save();
@@ -214,12 +226,18 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
     }
     
     const { name, email, password, role, rollNumber, section, branch, batch, department } = req.body;
+
+    // Input validation
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
+    if (!/\S+@\S+\.\S+/.test(email)) return res.status(400).json({ error: 'Invalid email format' });
+    if (!password) return res.status(400).json({ error: 'Password is required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     
     if (req.user.role === 'teacher' && role !== 'student') {
        return res.status(403).json({ error: 'Teachers can only create student accounts' });
     }
 
-    const existing = await User.findOne({ email });
+    const existing = await User.findOne({ email: email.trim().toLowerCase() });
     if (existing) return res.status(400).json({ error: 'Email already exists' });
 
     // SECURITY: Check for duplicate roll number
@@ -228,11 +246,11 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
       if (duplicateRoll) return res.status(400).json({ error: `Roll number ${rollNumber} is already assigned to ${duplicateRoll.name}` });
     }
 
-    const hashedPassword = await bcrypt.hash(password || 'password123', 10);
-    const uid = `user-${Date.now()}`;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const uid = new mongoose.Types.ObjectId().toString();
 
     const user = new User({
-      uid, name, email, password: hashedPassword, role, rollNumber, section, branch, batch, department
+      uid, name: name.trim(), email: email.trim().toLowerCase(), password: hashedPassword, role, rollNumber, section, branch, batch, department
     });
     await user.save();
     
@@ -245,6 +263,96 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Duplicate entry: email or roll number already exists' });
     }
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========= BULK STUDENT IMPORT =========
+app.post('/api/admin/users/bulk', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { students } = req.body;
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ error: 'students array is required and must not be empty' });
+    }
+    if (students.length > 200) {
+      return res.status(400).json({ error: 'Maximum 200 students per import' });
+    }
+
+    const created = [];
+    const failed = [];
+
+    // Process each student row
+    await Promise.allSettled(
+      students.map(async (student, index) => {
+        const { name, email, password, rollNumber, branch, section, batch } = student;
+
+        // Per-row validation
+        if (!name || typeof name !== 'string' || !name.trim()) {
+          failed.push({ row: index + 1, email: email || '—', reason: 'Name is required' });
+          return;
+        }
+        if (!email || !/\S+@\S+\.\S+/.test(email)) {
+          failed.push({ row: index + 1, email: email || '—', reason: 'Invalid or missing email' });
+          return;
+        }
+        if (!password || password.length < 6) {
+          failed.push({ row: index + 1, email, reason: 'Password must be at least 6 characters' });
+          return;
+        }
+
+        // Teachers can only create students
+        if (req.user.role === 'teacher') {
+          // role is always student for teacher imports — enforced
+        }
+
+        try {
+          // Check duplicates
+          const existing = await User.findOne({ email: email.trim().toLowerCase() });
+          if (existing) {
+            failed.push({ row: index + 1, email, reason: 'Email already exists' });
+            return;
+          }
+          if (rollNumber) {
+            const dupRoll = await User.findOne({ rollNumber: rollNumber.trim() });
+            if (dupRoll) {
+              failed.push({ row: index + 1, email, reason: `Roll number ${rollNumber} already assigned to ${dupRoll.name}` });
+              return;
+            }
+          }
+
+          const hashedPassword = await bcrypt.hash(password, 10);
+          const uid = new mongoose.Types.ObjectId().toString();
+          const user = new User({
+            uid,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            password: hashedPassword,
+            role: 'student',
+            rollNumber: rollNumber?.trim() || undefined,
+            branch: branch?.trim() || undefined,
+            section: section?.trim() || undefined,
+            batch: batch?.trim() || undefined,
+          });
+          await user.save();
+          created.push({ row: index + 1, name: user.name, email: user.email });
+        } catch (err) {
+          if (err.code === 11000) {
+            failed.push({ row: index + 1, email, reason: 'Duplicate entry (email or roll number already in DB)' });
+          } else {
+            failed.push({ row: index + 1, email, reason: err.message || 'Unknown error' });
+          }
+        }
+      })
+    );
+
+    console.log(`📥 Bulk import by ${req.user.email}: ${created.length} created, ${failed.length} failed`);
+    res.json({ created, failed, total: students.length });
+  } catch (error) {
+    console.error('Bulk import error:', error);
+    res.status(500).json({ error: 'Server error during bulk import' });
   }
 });
 
@@ -289,6 +397,75 @@ app.post('/api/admin/users/:uid/reset-device', requireAuth, async (req, res) => 
     res.json({ success: true, message: 'Device fingerprint reset successfully' });
   } catch (error) {
     console.error('Reset device error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Teacher: Reset a student's password (no old password needed)
+app.post('/api/teacher/students/:uid/reset-password', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const { uid } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+    const student = await User.findOne({ uid, role: 'student' });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    student.password = await bcrypt.hash(newPassword, 10);
+    await student.save();
+    console.log(`🔑 Password reset for ${student.name} by ${req.user.email}`);
+    res.json({ success: true, message: `Password reset for ${student.name}` });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Teacher/Admin: Update student details
+app.put('/api/teacher/students/:uid', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const { uid } = req.params;
+    const { name, email, rollNumber, branch, section, batch } = req.body;
+    // Validate
+    if (email && !/\S+@\S+\.\S+/.test(email)) return res.status(400).json({ error: 'Invalid email format' });
+    // Check email uniqueness
+    if (email) {
+      const existing = await User.findOne({ email: email.trim().toLowerCase(), uid: { $ne: uid } });
+      if (existing) return res.status(400).json({ error: 'Email already in use by another user' });
+    }
+    const updateData = {};
+    if (name) updateData.name = name.trim();
+    if (email) updateData.email = email.trim().toLowerCase();
+    if (rollNumber !== undefined) updateData.rollNumber = rollNumber.trim() || undefined;
+    if (branch !== undefined) updateData.branch = branch.trim() || undefined;
+    if (section !== undefined) updateData.section = section.trim() || undefined;
+    if (batch !== undefined) updateData.batch = batch.trim() || undefined;
+    const student = await User.findOneAndUpdate({ uid, role: 'student' }, updateData, { new: true, select: '-password' });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    res.json(student);
+  } catch (error) {
+    if (error.code === 11000) return res.status(400).json({ error: 'Duplicate email or roll number' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Teacher: Delete a student they created
+app.delete('/api/teacher/students/:uid', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const deleted = await User.findOneAndDelete({ uid: req.params.uid, role: 'student' });
+    if (!deleted) return res.status(404).json({ error: 'Student not found' });
+    console.log(`🗑️ Student ${deleted.name} deleted by ${req.user.email}`);
+    res.json({ success: true });
+  } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -573,7 +750,11 @@ app.get('/api/history/:studentUid', requireAuth, async (req, res) => {
 app.get('/api/teacher/history/:teacherName', requireAuth, async (req, res) => {
   try {
     const { teacherName } = req.params;
-    const sessions = await Session.find({ teacher: teacherName, status: 'ended' }).sort({ createdAt: -1 });
+    // Use the requesting teacher's own name from their token (prevents seeing other teachers' sessions)
+    const resolvedTeacherName = req.user.role === 'teacher'
+      ? (await User.findOne({ uid: req.user.uid }))?.name || teacherName
+      : teacherName;
+    const sessions = await Session.find({ teacher: resolvedTeacherName, status: 'ended' }).sort({ createdAt: -1 });
     
     const history = [];
     for (let session of sessions) {
@@ -674,18 +855,21 @@ app.post('/api/teacher/reports', requireAuth, async (req, res) => {
     // Wait, session schema has 'section' which maps to the batch. 
     // Let's aggregate properly.
     sessions.forEach(session => {
-      // Find students in this session's batch (section field)
+      // Find students in this session's batch (section field).
+      // Use a Set to ensure each student only counts the session ONCE (prevents double-count).
+      const countedStudents = new Set();
       students.forEach(student => {
-        // Assume session.section is the batch name or classroom ID. In this app, session.section is the batch name.
-        if (student.batch === session.section || student.section === session.section) {
-           studentMap[student.uid].totalClasses++;
+        if (!countedStudents.has(student.uid) &&
+            (student.batch === session.section || student.section === session.section)) {
+          studentMap[student.uid].totalClasses++;
+          countedStudents.add(student.uid);
         }
       });
     });
 
     attendances.forEach(record => {
-      if (record.status === 'Present') {
-        studentMap[record.studentUid].attended++;
+      if (record.status === 'Present' || record.status === 'Late Entry') {
+        if (studentMap[record.studentUid]) studentMap[record.studentUid].attended++;
       }
     });
 
@@ -885,21 +1069,37 @@ app.get('/api/notices', requireAuth, async (req, res) => {
 
 app.get('/api/teacher/low-attendance', requireAuth, async (req, res) => {
   try {
-    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Unauthorized' });
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Unauthorized' });
     
+    // Use aggregation pipeline instead of N+1 queries — one DB call for all students
+    const attendanceSummary = await Attendance.aggregate([
+      {
+        $group: {
+          _id: '$studentUid',
+          total: { $sum: 1 },
+          attended: {
+            $sum: {
+              $cond: [{ $in: ['$status', ['Present', 'Late Entry']] }, 1, 0]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Build a map for quick lookup
+    const summaryMap = {};
+    attendanceSummary.forEach(s => {
+      summaryMap[s._id] = s;
+    });
+
     // Get all students
-    const students = await User.find({ role: 'student' });
+    const students = await User.find({ role: 'student' }, 'uid name rollNumber batch');
     const lowAttendanceStudents = [];
 
-    // Calculate attendance for each student
-    for (const student of students) {
-      const records = await Attendance.find({ studentUid: student.uid });
-      const total = records.length;
-      if (total === 0) continue;
-
-      const attended = records.filter(r => r.status === 'Present' || r.status === 'Late Entry').length;
-      const percentage = (attended / total) * 100;
-
+    students.forEach(student => {
+      const summary = summaryMap[student.uid];
+      if (!summary || summary.total === 0) return;
+      const percentage = (summary.attended / summary.total) * 100;
       if (percentage < 75) {
         lowAttendanceStudents.push({
           uid: student.uid,
@@ -909,10 +1109,11 @@ app.get('/api/teacher/low-attendance', requireAuth, async (req, res) => {
           percentage: percentage.toFixed(1)
         });
       }
-    }
+    });
 
     res.json(lowAttendanceStudents);
   } catch (error) {
+    console.error('Low attendance error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -929,8 +1130,8 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// Debug endpoint - shows what's configured
-app.get('/api/debug/status', async (req, res) => {
+// Debug endpoint - protected (admin only)
+app.get('/api/debug/status', requireAuth, requireAdmin, async (req, res) => {
   const dbState = mongoose.connection.readyState;
   const dbStates = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
   
@@ -943,15 +1144,10 @@ app.get('/api/debug/status', async (req, res) => {
     // DB not connected
   }
   
-  // Show the host part of the URI for debugging
-  const uri = process.env.MONGODB_URI || '';
-  const hostMatch = uri.match(/@([^?]+)/);
-
   res.json({
     database: dbStates[dbState] || 'unknown',
     lastDbError,
     mongoUri: process.env.MONGODB_URI ? 'SET (hidden)' : 'NOT SET',
-    mongoHost: hostMatch ? hostMatch[1] : 'unknown',
     jwtSecret: process.env.JWT_SECRET ? 'SET' : 'NOT SET',
     frontendUrl: process.env.FRONTEND_URL || 'NOT SET',
     userCount,
@@ -960,10 +1156,9 @@ app.get('/api/debug/status', async (req, res) => {
   });
 });
 
-// Force reconnect endpoint
-app.get('/api/debug/reconnect', async (req, res) => {
+// Force reconnect endpoint — admin only
+app.get('/api/debug/reconnect', requireAuth, requireAdmin, async (req, res) => {
   res.json({ message: 'Reconnecting to MongoDB...' });
-  // Disconnect first if in a bad state
   try { await mongoose.disconnect(); } catch(e) {}
   connectWithRetry();
 });
