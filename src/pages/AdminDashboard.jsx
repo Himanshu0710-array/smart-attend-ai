@@ -197,7 +197,17 @@ export default function AdminDashboard() {
       const payload = ccForm.isCC
         ? { isCC: true, ccSection: ccForm.ccSection, ccBranch: ccForm.ccBranch, ccYear: ccForm.ccYear }
         : { isCC: false };
-      await api.setTeacherAsCC(editUser.uid, payload);
+      const updatedTeacher = await api.setTeacherAsCC(editUser.uid, payload);
+      
+      // Update local editUser so that saving other details doesn't overwrite / revert CC info
+      setEditUser(prev => ({
+        ...prev,
+        isCC: updatedTeacher.isCC,
+        ccSection: updatedTeacher.ccSection,
+        ccBranch: updatedTeacher.ccBranch,
+        ccYear: updatedTeacher.ccYear
+      }));
+
       toast.success(ccForm.isCC
         ? `${editUser.name} is now CC of ${ccForm.ccYear} Sec ${ccForm.ccSection} (${ccForm.ccBranch})`
         : `CC role removed from ${editUser.name}`);

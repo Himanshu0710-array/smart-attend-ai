@@ -98,6 +98,7 @@ export const getTimetable = () => request('/timetable');
 export const updateTimetable = (classGroup, date, slotIndex, data) => request('/timetable/update', { method: 'POST', body: JSON.stringify({ classGroup, date, slotIndex, data }) });
 
 // User Management & Settings
+export const getProfile = () => request('/users/profile');
 export const updateUser = (uid, data) => request(`/users/${uid}`, { method: 'PUT', body: JSON.stringify(data) });
 export const updatePassword = (uid, oldPassword, newPassword) => request(`/users/${uid}/password`, { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) });
 

@@ -39,6 +39,15 @@ export function AuthProvider({ children }) {
       const parsed = JSON.parse(savedUser);
       setCurrentUser(parsed);
       setUserData(parsed);
+
+      // Fetch latest profile from backend to sync settings (isCC, assignedSubjects, etc.)
+      api.getProfile().then(profile => {
+        setCurrentUser(profile);
+        setUserData(profile);
+        localStorage.setItem('smartattend_user', JSON.stringify(profile));
+      }).catch(err => {
+        console.warn('Failed to refresh user profile:', err);
+      });
     }
     setLoading(false);
 
