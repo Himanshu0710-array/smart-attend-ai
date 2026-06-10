@@ -310,11 +310,26 @@ export default function TeacherDashboard() {
 
     const startWithLocation = async (lat, lon) => {
       try {
-        const session = await api.startSession(selectedClassId, selectedClassroomId, teacherName, selectedSubject, lat, lon);
+        const batchObj = batches.find(b => b.id === selectedClassId);
+        if (!batchObj) {
+          setLocationError('Please select a valid Class Group.');
+          setLoading(false);
+          return;
+        }
+        const session = await api.startSession(
+          batchObj.year,
+          batchObj.section,
+          batchObj.branch,
+          selectedClassroomId,
+          teacherName,
+          selectedSubject,
+          lat,
+          lon
+        );
         setActiveSession(session);
       } catch (e) {
         console.error(e);
-        setLocationError('Failed to start session on the server.');
+        setLocationError(e.error || 'Failed to start session on the server.');
       }
       setLoading(false);
     };
