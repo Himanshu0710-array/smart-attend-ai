@@ -41,6 +41,25 @@ export function AuthProvider({ children }) {
       setUserData(parsed);
     }
     setLoading(false);
+
+    // Sync auth state across multiple tabs in real-time
+    const handleStorageChange = (e) => {
+      if (e.key === 'smartattend_token' || e.key === 'smartattend_user') {
+        const token = localStorage.getItem('smartattend_token');
+        const savedUser = localStorage.getItem('smartattend_user');
+        if (token && savedUser) {
+          const parsed = JSON.parse(savedUser);
+          setCurrentUser(parsed);
+          setUserData(parsed);
+        } else {
+          setCurrentUser(null);
+          setUserData(null);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   async function signup(email, password, role, additionalData) {

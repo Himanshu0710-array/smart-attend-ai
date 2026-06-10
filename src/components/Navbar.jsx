@@ -15,7 +15,8 @@ export default function Navbar({ setIsOpen }) {
 
   useEffect(() => {
     if (userData?.role === 'student') {
-      api.getNotices(userData.batch, userData.uid).then(data => {
+      const classGroup = `${userData.year} - ${userData.branch} - Sec ${userData.section}`;
+      api.getNotices(classGroup, userData.uid).then(data => {
         setNotices(data);
         const lastSeen = localStorage.getItem('lastSeenNotices');
         if (data.length > 0 && (!lastSeen || new Date(data[0].createdAt) > new Date(lastSeen))) {

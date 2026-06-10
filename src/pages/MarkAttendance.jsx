@@ -17,19 +17,48 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Audio fingerprint — differs even between two identical phones due to
+// hardware-level differences in the audio processing chip
+async function getAudioFingerprint() {
+  try {
+    const ctx = new OfflineAudioContext(1, 44100, 44100);
+    const oscillator = ctx.createOscillator();
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-50, ctx.currentTime);
+    compressor.knee.setValueAtTime(40, ctx.currentTime);
+    compressor.ratio.setValueAtTime(12, ctx.currentTime);
+    compressor.attack.setValueAtTime(0, ctx.currentTime);
+    compressor.release.setValueAtTime(0.25, ctx.currentTime);
+    oscillator.connect(compressor);
+    compressor.connect(ctx.destination);
+    oscillator.start(0);
+    const buffer = await ctx.startRendering();
+    const data = buffer.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < 500; i++) sum += Math.abs(data[i]);
+    return sum.toFixed(15); // High precision to capture tiny hardware differences
+  } catch {
+    return 'audio-unsupported';
+  }
+}
+
 // Generate a stable device fingerprint for anti-proxy detection
-function getDeviceFingerprint() {
+// Now async to include the audio hardware fingerprint
+async function getDeviceFingerprint() {
   const cached = localStorage.getItem('smartattend_device_fp');
   if (cached) return cached;
 
   try {
-    // Combine multiple browser/device signals
+    // Canvas fingerprint
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     ctx.textBaseline = 'top';
     ctx.font = '14px Arial';
     ctx.fillText('SmartAttend-FP', 2, 2);
     const canvasData = canvas.toDataURL();
+
+    // Audio fingerprint — unique per physical device even on identical models
+    const audioFP = await getAudioFingerprint();
 
     const signals = [
       navigator.userAgent,
@@ -39,6 +68,7 @@ function getDeviceFingerprint() {
       new Date().getTimezoneOffset(),
       navigator.hardwareConcurrency || 'unknown',
       canvasData.substring(0, 100),
+      audioFP, // Hardware-level audio signal
     ].join('|');
 
     // Simple hash
@@ -58,8 +88,6 @@ function getDeviceFingerprint() {
 
 export default function MarkAttendance() {
   const { userData } = useAuth();
-  // Use batch for new students, fallback to section for legacy students
-  const studentGroup = userData?.batch || userData?.section || 'A';
   const studentUid = userData?.uid || 'demo-student-001';
 
   const [liveSessions, setLiveSessions] = useState([]);
@@ -78,7 +106,7 @@ export default function MarkAttendance() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const sessions = await api.getSessions(studentGroup);
+        const sessions = await api.getSessions();
         setLiveSessions(sessions);
         if (sessions.length > 0 && !selectedSession) {
           setSelectedSession(sessions[0]);
@@ -94,7 +122,7 @@ export default function MarkAttendance() {
     fetch();
     const interval = setInterval(fetch, 3000);
     return () => clearInterval(interval);
-  }, [studentGroup, selectedSession]);
+  }, [selectedSession]);
 
   // Fetch my current status in selected session
   useEffect(() => {
@@ -116,9 +144,9 @@ export default function MarkAttendance() {
     setLocationError('');
     setDeviceError('');
 
-    // Proactively check device fingerprint first
+    // Proactively check device fingerprint first (now async — includes audio signal)
     try {
-      const fp = getDeviceFingerprint();
+      const fp = await getDeviceFingerprint();
       const res = await api.verifyDeviceFingerprint(fp, studentUid);
       if (!res.valid) {
         setDeviceError(res.message);
@@ -128,7 +156,7 @@ export default function MarkAttendance() {
       }
     } catch (e) {
       console.warn('Could not verify device fingerprint', e);
-      // Fail open if server error or keep going? We'll keep going and let markAttendance catch it if needed
+      // Fail open on network error — server will re-check on markAttendance
     }
 
     if (!navigator.geolocation) {
@@ -141,25 +169,38 @@ export default function MarkAttendance() {
       async (position) => {
         const { latitude, longitude, accuracy } = position.coords;
         setLocation({ latitude, longitude, accuracy });
-
-        const dist = getDistance(latitude, longitude, selectedSession.lat, selectedSession.lon);
-        setDistance(Math.round(dist));
         setLastChecked(new Date());
 
-        const isInside = dist <= selectedSession.radius;
+        // --- Location check: bounding box (preferred) or legacy radius fallback ---
+        let isInside;
+        let dist = null;
+
+        if (selectedSession.lat_min != null) {
+          // Precise classroom bounding box check
+          isInside = latitude  >= selectedSession.lat_min &&
+                     latitude  <= selectedSession.lat_max &&
+                     longitude >= selectedSession.lon_min &&
+                     longitude <= selectedSession.lon_max;
+        } else {
+          // Legacy: Haversine radius check
+          dist = getDistance(latitude, longitude, selectedSession.lat, selectedSession.lon);
+          isInside = dist <= selectedSession.radius;
+        }
+
+        setDistance(dist !== null ? Math.round(dist) : null);
 
         try {
           if (isInside) {
             if (myStatus === 'Absent' || !myStatus) {
               const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
-              const fp = getDeviceFingerprint();
-              await api.markAttendance(selectedSession.id, studentUid, dist, elapsed > 10, fp);
+              const fp = await getDeviceFingerprint();
+              await api.markAttendance(selectedSession.id, studentUid, dist ?? 0, elapsed > 10, fp);
             } else {
-              await api.reverifyAttendance(selectedSession.id, studentUid, true, dist);
+              await api.reverifyAttendance(selectedSession.id, studentUid, true, dist ?? 0);
             }
           } else {
             if (myStatus && myStatus !== 'Absent') {
-              await api.reverifyAttendance(selectedSession.id, studentUid, false, dist);
+              await api.reverifyAttendance(selectedSession.id, studentUid, false, dist ?? 0);
             }
           }
           // Re-fetch status
@@ -245,7 +286,10 @@ export default function MarkAttendance() {
             </div>
             <div>
               <h2 className="font-semibold text-slate-900 dark:text-white">{selectedSession.className} — {selectedSession.room}</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedSession.teacher} • Radius: {selectedSession.radius}m</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {selectedSession.teacher} •{' '}
+                {selectedSession.lat_min != null ? '📐 Classroom boundary active' : `Radius: ${selectedSession.radius}m`}
+              </p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
@@ -289,7 +333,11 @@ export default function MarkAttendance() {
             <CheckCircle className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
           </div>
           <h3 className="text-xl font-bold text-emerald-800 dark:text-emerald-200 mb-1">Attendance Marked — {myStatus}!</h3>
-          <p className="text-emerald-600 dark:text-emerald-400 text-sm">You are {distance}m from the classroom (within {selectedSession?.radius}m)</p>
+          <p className="text-emerald-600 dark:text-emerald-400 text-sm">
+            {distance !== null
+              ? `You are ${distance}m from the classroom (within ${selectedSession?.radius}m)`
+              : '✅ You are inside the classroom'}
+          </p>
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-emerald-600/80 dark:text-emerald-400/80">
             <ShieldCheck className="w-4 h-4" />
             <span>GPS verified at {lastChecked?.toLocaleTimeString()}</span>
@@ -312,7 +360,11 @@ export default function MarkAttendance() {
             <XCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
           </div>
           <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">Outside Classroom Area</h3>
-          <p className="text-red-600 dark:text-red-400 text-sm">You are {distance}m away (allowed: {selectedSession?.radius}m)</p>
+          <p className="text-red-600 dark:text-red-400 text-sm">
+            {distance !== null
+              ? `You are ${distance}m away (allowed: ${selectedSession?.radius}m)`
+              : '❌ Your GPS is outside the classroom boundaries'}
+          </p>
           <button onClick={() => { setCheckResult(null); checkLocation(); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Check Again
           </button>

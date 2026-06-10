@@ -7,14 +7,14 @@ import { useToast } from '../contexts/ToastContext';
 
 // ─── Expected CSV columns ────────────────────────────────────────────────────
 const REQUIRED_COLS = ['name', 'email', 'password'];
-const OPTIONAL_COLS = ['rollNumber', 'branch', 'section', 'batch'];
+const OPTIONAL_COLS = ['rollNumber', 'branch', 'section', 'year'];
 const ALL_COLS = [...REQUIRED_COLS, ...OPTIONAL_COLS];
 
 // ─── Sample CSV template content ─────────────────────────────────────────────
-const CSV_TEMPLATE = `name,email,password,rollNumber,branch,section,batch
-Rahul Sharma,rahul@college.edu,Pass@123,CSE2021001,CSE,A,CSE-A-2021
-Priya Singh,priya@college.edu,Pass@456,CSE2021002,CSE,B,CSE-B-2021
-Arjun Mehta,arjun@college.edu,Pass@789,CSE2021003,CSE,A,CSE-A-2021`;
+const CSV_TEMPLATE = `name,email,password,rollNumber,branch,section,year
+Rahul Sharma,rahul@college.edu,Pass@123,CSE2021001,CSE,A,2nd Year
+Priya Singh,priya@college.edu,Pass@456,CSE2021002,CSE,B,1st Year
+Arjun Mehta,arjun@college.edu,Pass@789,CSE2021003,CSE,A,3rd Year`;
 
 function downloadTemplate() {
   const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv' });
@@ -62,7 +62,7 @@ export default function BulkImportModal({ onClose, onSuccess }) {
         rollNumber: raw.rollnumber || raw['roll'] || raw['rollno'] || '',
         branch: raw.branch || raw['dept'] || raw['department'] || '',
         section: raw.section || raw['sec'] || '',
-        batch: raw.batch || raw['batchname'] || raw['class'] || '',
+        year: raw.year || raw['academicyear'] || raw['yearofstudying'] || '',
       };
       return validateRow(normalized, i);
     });
@@ -85,7 +85,7 @@ export default function BulkImportModal({ onClose, onSuccess }) {
         rollNumber: lower.rollnumber || lower.roll || lower.rollno || '',
         branch: lower.branch || lower.dept || lower.department || '',
         section: lower.section || lower.sec || '',
-        batch: lower.batch || lower.batchname || lower.class || '',
+        year: lower.year || lower.academicyear || lower.yearofstudying || '',
       };
       return validateRow(normalized, i);
     });
@@ -279,7 +279,7 @@ export default function BulkImportModal({ onClose, onSuccess }) {
                         <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Name</th>
                         <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Email</th>
                         <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Roll No.</th>
-                        <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Batch</th>
+                        <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Year / Section</th>
                         <th className="py-2.5 px-3 text-left font-medium text-slate-500 dark:text-slate-400">Status</th>
                       </tr>
                     </thead>
@@ -293,7 +293,7 @@ export default function BulkImportModal({ onClose, onSuccess }) {
                           <td className="py-2 px-3 text-slate-800 dark:text-slate-200 font-medium">{data.name || <span className="text-red-400 italic">missing</span>}</td>
                           <td className="py-2 px-3 text-slate-600 dark:text-slate-400 text-xs font-mono">{data.email || <span className="text-red-400 italic">missing</span>}</td>
                           <td className="py-2 px-3 text-slate-500 dark:text-slate-400 text-xs font-mono">{data.rollNumber || '—'}</td>
-                          <td className="py-2 px-3 text-slate-500 dark:text-slate-400 text-xs">{data.batch || '—'}</td>
+                          <td className="py-2 px-3 text-slate-500 dark:text-slate-400 text-xs">{data.year ? `${data.year}${data.section ? ` / Sec ${data.section}` : ''}` : data.section || '—'}</td>
                           <td className="py-2 px-3">
                             {errors.length === 0 ? (
                               <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium">

@@ -22,7 +22,6 @@ export default function StudentDashboard() {
   const { userData } = useAuth();
   const navigate = useNavigate();
 
-  const studentGroup = userData?.batch || userData?.section || 'A';
   const studentUid = userData?.uid || 'demo-student-001';
 
   const [liveSessions, setLiveSessions] = useState([]);
@@ -34,7 +33,7 @@ export default function StudentDashboard() {
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const sessions = await api.getSessions(studentGroup);
+        const sessions = await api.getSessions();
         setLiveSessions(sessions);
 
         // Fetch my status for each session
@@ -50,13 +49,14 @@ export default function StudentDashboard() {
     fetchSessions();
     const interval = setInterval(fetchSessions, 3000);
     return () => clearInterval(interval);
-  }, [studentGroup, studentUid]);
+  }, [studentUid]);
 
   // Fetch history and notices
   useEffect(() => {
     api.getStudentHistory(studentUid).then(setHistory).catch(console.error);
-    api.getNotices(userData?.batch, studentUid).then(setNotices).catch(console.error);
-  }, [studentUid, userData?.batch]);
+    const classGroup = userData ? `${userData.year} - ${userData.branch} - Sec ${userData.section}` : '';
+    api.getNotices(classGroup, studentUid).then(setNotices).catch(console.error);
+  }, [studentUid, userData]);
 
   const totalClasses = history.length;
   const attended = history.filter(h => h.status === 'Present' || h.status === 'Late Entry').length;
@@ -71,7 +71,7 @@ export default function StudentDashboard() {
             Welcome back, {userData?.name?.split(' ')[0] || 'Student'} 👋
           </h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
-            {userData?.branch || userData?.course || 'Branch'} • {userData?.batch || 'Batch'} • Section {userData?.section || '—'}
+            {userData?.year || 'Year'} • {userData?.branch || 'Branch'} • Section {userData?.section || '—'}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full w-fit">

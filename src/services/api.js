@@ -9,6 +9,14 @@ export const request = async (endpoint, options = {}) => {
   };
 
   const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  
+  if (response.status === 401 && !endpoint.startsWith('/auth/')) {
+    localStorage.removeItem('smartattend_token');
+    localStorage.removeItem('smartattend_user');
+    window.location.href = '/login';
+    throw { error: 'Session expired. Please log in again.' };
+  }
+
   const data = await response.json();
   
   if (!response.ok) {
@@ -46,14 +54,25 @@ export const getUsers = () => request('/admin/users');
 export const createUser = (user) => request('/admin/users', { method: 'POST', body: JSON.stringify(user) });
 export const deleteUser = (uid) => request(`/admin/users/${uid}`, { method: 'DELETE' });
 
-// Admin Batches (Classrooms)
-export const getClassrooms = () => request('/classrooms'); // Works for both Teachers and Admin
-export const createBatch = (batch) => request('/admin/batches', { method: 'POST', body: JSON.stringify(batch) });
-export const deleteBatch = (id) => request(`/admin/batches/${id}`, { method: 'DELETE' });
+// Class Groups (derived from student year/section/branch)
+export const getClassGroups = () => request('/class-groups');
 
-// Sessions
+// Classrooms
+export const getClassrooms = () => request('/classrooms');
+export const createClassroom = (classroom) => request('/admin/classrooms', { method: 'POST', body: JSON.stringify(classroom) });
+export const updateClassroom = (id, data) => request(`/admin/classrooms/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteClassroom = (id) => request(`/admin/classrooms/${id}`, { method: 'DELETE' });
+
+// Subjects
+export const getSubjects = () => request('/subjects');
+export const createSubject = (subject) => request('/admin/subjects', { method: 'POST', body: JSON.stringify(subject) });
+export const updateSubject = (id, data) => request(`/admin/subjects/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteSubject = (id) => request(`/admin/subjects/${id}`, { method: 'DELETE' });
+
+// Sessions — now takes year/section/branch instead of classId
 export const getSessions = (section) => request(`/sessions${section ? `?section=${section}` : ''}`);
-export const startSession = (classId, teacherName, subject, lat, lon) => request('/sessions', { method: 'POST', body: JSON.stringify({ classId, teacherName, subject, lat, lon }) });
+export const startSession = (year, section, branch, classroomId, teacherName, subject, lat, lon) =>
+  request('/sessions', { method: 'POST', body: JSON.stringify({ year, section, branch, classroomId, teacherName, subject, lat, lon }) });
 export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { method: 'DELETE' });
 
 // Attendance
@@ -76,7 +95,7 @@ export const deleteStudentByTeacher = (uid) => request(`/teacher/students/${uid}
 
 // Timetable
 export const getTimetable = () => request('/timetable');
-export const updateTimetable = (batch, date, slotIndex, data) => request('/timetable/update', { method: 'POST', body: JSON.stringify({ batch, date, slotIndex, data }) });
+export const updateTimetable = (classGroup, date, slotIndex, data) => request('/timetable/update', { method: 'POST', body: JSON.stringify({ classGroup, date, slotIndex, data }) });
 
 // User Management & Settings
 export const updateUser = (uid, data) => request(`/users/${uid}`, { method: 'PUT', body: JSON.stringify(data) });
@@ -84,9 +103,16 @@ export const updatePassword = (uid, oldPassword, newPassword) => request(`/users
 
 // Notices & Announcements
 export const createNotice = (data) => request('/notices', { method: 'POST', body: JSON.stringify(data) });
-export const getNotices = (batch = '', uid = '') => request(`/notices?batch=${encodeURIComponent(batch)}&uid=${encodeURIComponent(uid)}`);
+export const getNotices = (classGroup = '', uid = '') => request(`/notices?classGroup=${encodeURIComponent(classGroup)}&uid=${encodeURIComponent(uid)}`);
 export const getLowAttendanceStudents = () => request('/teacher/low-attendance');
 
 // Device Security
 export const verifyDeviceFingerprint = (deviceFingerprint, studentUid) => request('/auth/verify-device', { method: 'POST', body: JSON.stringify({ deviceFingerprint, studentUid }) });
 export const resetDeviceFingerprint = (studentUid) => request(`/admin/users/${studentUid}/reset-device`, { method: 'POST' });
+
+// System Config & Promotion
+export const getSystemConfig = () => request('/system/config');
+export const promoteSystemSession = (newAcademicSession) => request('/admin/system/promote', { method: 'POST', body: JSON.stringify({ newAcademicSession }) });
+
+// CC (Class Coordinator) management — admin only
+export const setTeacherAsCC = (uid, data) => request(`/admin/users/${uid}/set-cc`, { method: 'PUT', body: JSON.stringify(data) });

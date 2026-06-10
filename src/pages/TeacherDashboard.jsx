@@ -32,9 +32,12 @@ export default function TeacherDashboard() {
   const [activeTab, setActiveTab] = useState('live'); // 'live', 'history', 'timetable'
 
   // Live Session State
+  const [batches, setBatches] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
-  const [selectedClassId, setSelectedClassId] = useState('');
-  const [sessionSubject, setSessionSubject] = useState('');
+  const [subjects, setSubjects] = useState([]);
+  const [selectedClassId, setSelectedClassId] = useState(''); // Selected Batch ID
+  const [selectedClassroomId, setSelectedClassroomId] = useState(''); // Selected Classroom ID
+  const [selectedSubject, setSelectedSubject] = useState(''); // Selected Subject Name
   const [activeSession, setActiveSession] = useState(null);
   const [studentList, setStudentList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -52,14 +55,14 @@ export default function TeacherDashboard() {
   const [editingCell, setEditingCell] = useState(null); // { date, slotIndex, data }
 
   // Reports State
-  const [reportFilters, setReportFilters] = useState({ startDate: '', endDate: '', branch: '', batch: '', section: '' });
+  const [reportFilters, setReportFilters] = useState({ startDate: '', endDate: '', branch: '', year: '', section: '' });
   const [reportData, setReportData] = useState([]);
   const [loadingReport, setLoadingReport] = useState(false);
 
   // Students State
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
-  const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
+  const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', year: '' });
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [studentListForTeacher, setStudentListForTeacher] = useState([]);
   // Edit student state
@@ -75,21 +78,47 @@ export default function TeacherDashboard() {
   const [notices, setNotices] = useState([]);
   const [lowAttendanceStudents, setLowAttendanceStudents] = useState([]);
   const [showNoticeModal, setShowNoticeModal] = useState(false);
-  const [newNotice, setNewNotice] = useState({ title: '', message: '', targetType: 'batch', targetId: '' });
+  const [newNotice, setNewNotice] = useState({ title: '', message: '', targetType: 'classGroup', targetId: '' });
   const [isSendingNotice, setIsSendingNotice] = useState(false);
 
   const teacherName = userData?.name || 'Teacher';
 
-  // Load classrooms on mount
+  // Load batches, classrooms, and subjects on mount
   useEffect(() => {
-    api.getClassrooms().then(data => {
-      setClassrooms(data);
-      if (data.length > 0) {
-        setSelectedClassId(data[0].id);
-        if (!selectedBatch) setSelectedBatch(data[0].name);
+    Promise.all([
+      api.getClassGroups(),
+      api.getClassrooms(),
+      api.getSubjects()
+    ]).then(([batchesData, classroomsData, subjectsData]) => {
+      setBatches(batchesData);
+      setClassrooms(classroomsData);
+      setSubjects(subjectsData);
+      
+      if (batchesData.length > 0) {
+        setSelectedClassId(batchesData[0].id);
+        if (!selectedBatch) setSelectedBatch(batchesData[0].name);
+      }
+      if (classroomsData.length > 0) {
+        setSelectedClassroomId(classroomsData[0].id);
       }
     }).catch(console.error);
   }, []);
+
+  // Automatically select the first subject of the selected batch's year on batch change
+  useEffect(() => {
+    if (selectedClassId && batches.length > 0) {
+      const batchObj = batches.find(b => b.id === selectedClassId);
+      if (batchObj) {
+        setSelectedBatch(batchObj.name);
+        const yearSubs = subjects.filter(s => s.year === batchObj.year);
+        if (yearSubs.length > 0) {
+          setSelectedSubject(yearSubs[0].name);
+        } else {
+          setSelectedSubject('');
+        }
+      }
+    }
+  }, [selectedClassId, batches, subjects]);
 
   // Poll for active sessions
   useEffect(() => {
@@ -223,7 +252,7 @@ export default function TeacherDashboard() {
       doc.setFontSize(11);
       doc.text(`Name: ${student.name}`, 14, 32);
       doc.text(`Roll No: ${student.rollNumber}`, 14, 38);
-      doc.text(`Batch / Branch: ${student.batch} / ${student.branch}`, 14, 44);
+      doc.text(`Class / Branch: ${student.year || '—'} (Sec ${student.section || '—'}) / ${student.branch}`, 14, 44);
       doc.text(`Overall Attendance: ${student.attended} / ${student.totalClasses} (${perc}%)`, 14, 50);
 
       if (reportFilters.startDate || reportFilters.endDate) {
@@ -281,7 +310,7 @@ export default function TeacherDashboard() {
 
     const startWithLocation = async (lat, lon) => {
       try {
-        const session = await api.startSession(selectedClassId, teacherName, sessionSubject, lat, lon);
+        const session = await api.startSession(selectedClassId, selectedClassroomId, teacherName, selectedSubject, lat, lon);
         setActiveSession(session);
       } catch (e) {
         console.error(e);
@@ -358,10 +387,16 @@ export default function TeacherDashboard() {
     e.preventDefault();
     setIsCreatingStudent(true);
     try {
-      await api.createStudentByTeacher(newStudent);
+      const payload = {
+        ...newStudent,
+        year: userData?.ccYear,
+        branch: userData?.ccBranch,
+        section: userData?.ccSection
+      };
+      await api.createStudentByTeacher(payload);
       toast.success('Student created successfully!');
       setShowStudentModal(false);
-      setNewStudent({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', batch: '' });
+      setNewStudent({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', year: userData?.ccYear || '' });
       fetchStudents();
     } catch (error) {
       toast.error(error.error || 'Failed to create student');
@@ -381,7 +416,7 @@ export default function TeacherDashboard() {
         rollNumber: editingStudent.rollNumber,
         branch: editingStudent.branch,
         section: editingStudent.section,
-        batch: editingStudent.batch,
+        year: editingStudent.year,
       });
       toast.success('Student updated successfully!');
       setShowEditStudentModal(false);
@@ -477,14 +512,16 @@ export default function TeacherDashboard() {
               </h2>
               <p className="text-sm text-slate-500 mt-1">View and register new students to your classes.</p>
             </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              <button onClick={() => setShowBulkModal(true)} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow flex items-center gap-1.5">
-                <FileSpreadsheet className="w-4 h-4" /> Import CSV
-              </button>
-              <button onClick={() => setShowStudentModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow shrink-0">
-                + Register Student
-              </button>
-            </div>
+            {userData?.isCC && (
+              <div className="flex flex-wrap gap-2 shrink-0">
+                <button onClick={() => setShowBulkModal(true)} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-4 h-4" /> Import CSV
+                </button>
+                <button onClick={() => setShowStudentModal(true)} className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg hover:shadow-md transition-shadow shrink-0">
+                  + Register Student
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="pro-card overflow-hidden">
@@ -494,7 +531,7 @@ export default function TeacherDashboard() {
                   <tr>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Student Name</th>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Roll Number</th>
-                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Batch / Section</th>
+                    <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Class / Section</th>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400">Branch</th>
                     <th className="py-3 px-4 font-medium text-slate-500 dark:text-slate-400 text-right">Actions</th>
                   </tr>
@@ -510,49 +547,55 @@ export default function TeacherDashboard() {
                       </td>
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono">{student.rollNumber || '-'}</td>
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                        {student.batch || student.section || '-'}
-                        {student.batch && student.section && student.batch !== student.section && ` (${student.section})`}
+                        {student.year || '-'} {student.section && `(Sec ${student.section})`}
                       </td>
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
                         {student.branch || '-'}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
-                            className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 transition-colors" title="Edit student"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => { setResetPasswordStudent(student); setNewPasswordValue(''); setShowResetPasswordModal(true); }}
-                            className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Reset password"
-                          >
-                            <KeyRound className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (window.confirm(`Reset bound device for ${student.name}?`)) {
-                                try {
-                                  await api.resetDeviceFingerprint(student.uid);
-                                  toast.success(`Device reset for ${student.name}`);
-                                } catch (e) {
-                                  toast.error(e.error || 'Failed to reset device');
+                        {userData?.isCC && 
+                         student.year === userData.ccYear && 
+                         student.section === userData.ccSection && 
+                         student.branch === userData.ccBranch ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
+                              className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 transition-colors" title="Edit student"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => { setResetPasswordStudent(student); setNewPasswordValue(''); setShowResetPasswordModal(true); }}
+                              className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Reset password"
+                            >
+                              <KeyRound className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Reset bound device for ${student.name}?`)) {
+                                  try {
+                                    await api.resetDeviceFingerprint(student.uid);
+                                    toast.success(`Device reset for ${student.name}`);
+                                  } catch (e) {
+                                    toast.error(e.error || 'Failed to reset device');
+                                  }
                                 }
-                              }
-                            }}
-                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                            title="Reset device fingerprint"
-                          >
-                            Reset Device
-                          </button>
-                          <button
-                            onClick={() => handleDeleteStudent(student)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Delete student"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                              }}
+                              className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                              title="Reset device fingerprint"
+                            >
+                              Reset Device
+                            </button>
+                            <button
+                              onClick={() => handleDeleteStudent(student)}
+                              className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Delete student"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -606,31 +649,77 @@ export default function TeacherDashboard() {
                 </span>
               )}
             </h2>
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-              <div className="flex-1 min-w-[200px]">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Select Batch</label>
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-end w-full">
+              <div className="flex-1 min-w-[180px] w-full">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Select Class Group</label>
                 <select
                   value={selectedClassId}
                   onChange={(e) => setSelectedClassId(e.target.value)}
                   disabled={!!activeSession}
                   className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all disabled:opacity-50"
                 >
-                  {classrooms.map((cls) => (
-                    <option key={cls.id} value={cls.id}>{cls.name} ({cls.room})</option>
+                  {batches.map((cls) => (
+                    <option key={cls.id} value={cls.id}>{cls.name}</option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex-1 min-w-[200px]">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Subject (Optional)</label>
-                <input
-                  type="text"
-                  value={sessionSubject}
-                  onChange={(e) => setSessionSubject(e.target.value)}
+              <div className="flex-1 min-w-[180px] w-full">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Select Classroom</label>
+                <select
+                  value={selectedClassroomId}
+                  onChange={(e) => setSelectedClassroomId(e.target.value)}
                   disabled={!!activeSession}
-                  placeholder="e.g. DSA, SI Practice"
                   className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all disabled:opacity-50"
-                />
+                >
+                  {classrooms.map((room) => (
+                    <option key={room.id} value={room.id}>{room.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex-1 min-w-[180px] w-full">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Subject</label>
+                <select
+                  value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  disabled={!!activeSession}
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all disabled:opacity-50 font-medium"
+                >
+                  {(() => {
+                    if (!selectedClassId || batches.length === 0) {
+                      return <option value="">Select Class Group First</option>;
+                    }
+                    const selectedBatchObj = batches.find(b => b.id === selectedClassId);
+                    if (!selectedBatchObj) {
+                      return <option value="">Select Class Group First</option>;
+                    }
+
+                    const assignments = userData?.assignedSubjects || [];
+                    const matchedAssignments = assignments.filter(as => 
+                      as.year === selectedBatchObj.year &&
+                      as.section === selectedBatchObj.section &&
+                      as.branch === selectedBatchObj.branch
+                    );
+
+                    const filteredSubs = subjects.filter(sub => 
+                      matchedAssignments.some(as => as.subjectName === sub.name)
+                    );
+
+                    if (filteredSubs.length === 0) {
+                      return <option value="">No assigned subjects for this class group</option>;
+                    }
+
+                    return (
+                      <>
+                        <option value="">Select Assigned Subject</option>
+                        {filteredSubs.map((sub) => (
+                          <option key={sub.id} value={sub.name}>{sub.name} {sub.code ? `(${sub.code})` : ''}</option>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </select>
               </div>
 
               {!activeSession ? (
@@ -653,7 +742,11 @@ export default function TeacherDashboard() {
               <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
                 <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
                 <span className="font-medium">Live:</span> {activeSession.className} — Started at {new Date(activeSession.startTime).toLocaleTimeString()}
-                <span className="ml-2 text-xs opacity-75 hidden sm:inline">(Lat: {activeSession.lat.toFixed(4)}, Lon: {activeSession.lon.toFixed(4)})</span>
+                <span className="ml-2 text-xs opacity-75 hidden sm:inline">
+                  {activeSession.lat_min != null
+                    ? `(📐 Classroom boundary)`
+                    : `(Lat: ${activeSession.lat?.toFixed(4)}, Lon: ${activeSession.lon?.toFixed(4)})`}
+                </span>
                 <span className="ml-auto text-xs text-emerald-600/60">Auto-refreshing every 3s</span>
               </div>
             )}
@@ -930,10 +1023,13 @@ export default function TeacherDashboard() {
                 <input type="date" value={reportFilters.endDate} onChange={e => setReportFilters({...reportFilters, endDate: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Batch</label>
-                <select value={reportFilters.batch} onChange={e => setReportFilters({...reportFilters, batch: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white">
-                  <option value="">All Batches</option>
-                  {classrooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Year</label>
+                <select value={reportFilters.year} onChange={e => setReportFilters({...reportFilters, year: e.target.value})} className="w-full p-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 dark:text-white">
+                  <option value="">All Years</option>
+                  <option value="1st Year">1st Year</option>
+                  <option value="2nd Year">2nd Year</option>
+                  <option value="3rd Year">3rd Year</option>
+                  <option value="4th Year">4th Year</option>
                 </select>
               </div>
               <div>
@@ -957,8 +1053,8 @@ export default function TeacherDashboard() {
               {reportData.length > 0 && (
                 <button
                   onClick={() => {
-                    const headers = 'Name,Roll Number,Batch,Branch,Total Classes,Attended,Percentage\n';
-                    const rows = reportData.map(s => `${s.name},${s.rollNumber},${s.batch},${s.branch},${s.totalClasses},${s.attended},${s.totalClasses > 0 ? ((s.attended/s.totalClasses)*100).toFixed(1) : 0}%`).join('\n');
+                    const headers = 'Name,Roll Number,Year,Section,Branch,Total Classes,Attended,Percentage\n';
+                    const rows = reportData.map(s => `${s.name},${s.rollNumber},${s.year || s.batch || ''},${s.section || ''},${s.branch || ''},${s.totalClasses},${s.attended},${s.totalClasses > 0 ? ((s.attended/s.totalClasses)*100).toFixed(1) : 0}%`).join('\n');
                     const blob = new Blob([headers + rows], { type: 'text/csv' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -984,7 +1080,7 @@ export default function TeacherDashboard() {
                     <tr>
                       <th className="py-3 px-4 font-medium text-slate-500">Student Name</th>
                       <th className="py-3 px-4 font-medium text-slate-500">Roll No.</th>
-                      <th className="py-3 px-4 font-medium text-slate-500">Batch / Branch</th>
+                      <th className="py-3 px-4 font-medium text-slate-500">Class Group / Branch</th>
                       <th className="py-3 px-4 font-medium text-slate-500">Classes Attended</th>
                       <th className="py-3 px-4 font-medium text-slate-500">Attendance %</th>
                       <th className="py-3 px-4 font-medium text-slate-500">Actions</th>
@@ -997,7 +1093,9 @@ export default function TeacherDashboard() {
                         <tr key={student.uid} className="hover:bg-slate-50 dark:hover:bg-slate-800/20">
                           <td className="py-3 px-4 text-slate-900 dark:text-white font-medium">{student.name}</td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono">{student.rollNumber}</td>
-                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{student.batch} • {student.branch}</td>
+                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                            {student.year || student.batch || ''} - {student.branch} {student.section && `(Sec ${student.section})`}
+                          </td>
                           <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{student.attended} / {student.totalClasses}</td>
                           <td className="py-3 px-4">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${perc >= 75 ? 'bg-emerald-100 text-emerald-800' : perc >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
@@ -1029,14 +1127,14 @@ export default function TeacherDashboard() {
       {activeTab === 'timetable' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col h-full">
           
-          {/* Header & Batch Selector */}
+          {/* Header & Class Group Selector */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <CalendarIcon className="w-6 h-6 text-purple-500" />
               CRT Timetable
             </h2>
             <div className="flex flex-wrap gap-2">
-              {classrooms.map(cls => (
+              {batches.map(cls => (
                 <button
                   key={cls.id}
                   onClick={() => setSelectedBatch(cls.name)}
@@ -1198,33 +1296,35 @@ export default function TeacherDashboard() {
       {/* Student Modal */}
       {showStudentModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Register New Student</h2>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-700">
+            <h2 className="text-xl font-bold mb-3 dark:text-white">Register New Student</h2>
+            <div className="mb-4 bg-amber-50 dark:bg-amber-955/20 text-amber-800 dark:text-amber-300 p-3.5 rounded-xl border border-amber-250 dark:border-amber-900/30 text-sm">
+              Registering student for your coordinator section:<br/>
+              <strong className="font-semibold text-amber-900 dark:text-amber-200 mt-1 block">
+                {userData?.ccYear} - {userData?.ccBranch} - Sec {userData?.ccSection}
+              </strong>
+            </div>
             <form onSubmit={handleCreateStudent} className="space-y-4">
-              <div><input type="text" placeholder="Name" required value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
-              <div><input type="email" placeholder="Email" required value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
-              <div><input type="password" placeholder="Password" required value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
-              
               <div>
-                <select 
-                  value={newStudent.batch} 
-                  onChange={e => setNewStudent({...newStudent, batch: e.target.value})} 
-                  className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
-                  required
-                >
-                  <option value="" disabled>Select Batch</option>
-                  {classrooms.map(b => (
-                    <option key={b.id} value={b.name}>{b.name}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Name</label>
+                <input type="text" placeholder="Student's Name" required value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} className="w-full p-2.5 border rounded-xl dark:bg-slate-800 dark:border-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
-              <div><input type="text" placeholder="Branch (e.g. CSE)" required value={newStudent.branch} onChange={e => setNewStudent({...newStudent, branch: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
-              <div><input type="text" placeholder="Section (e.g. A)" required value={newStudent.section} onChange={e => setNewStudent({...newStudent, section: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
-              <div><input type="text" placeholder="Roll Number" required value={newStudent.rollNumber} onChange={e => setNewStudent({...newStudent, rollNumber: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" /></div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Email</label>
+                <input type="email" placeholder="Student's Email" required value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} className="w-full p-2.5 border rounded-xl dark:bg-slate-800 dark:border-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Password</label>
+                <input type="password" placeholder="Initial Password" required value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} className="w-full p-2.5 border rounded-xl dark:bg-slate-800 dark:border-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Roll Number</label>
+                <input type="text" placeholder="Roll Number (e.g. CSE2023001)" required value={newStudent.rollNumber} onChange={e => setNewStudent({...newStudent, rollNumber: e.target.value})} className="w-full p-2.5 border rounded-xl dark:bg-slate-800 dark:border-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
 
               <div className="flex justify-end gap-2 mt-6">
-                <button type="button" onClick={() => setShowStudentModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white" disabled={isCreatingStudent}>Cancel</button>
-                <button type="submit" disabled={isCreatingStudent} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                <button type="button" onClick={() => setShowStudentModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 rounded-lg font-medium" disabled={isCreatingStudent}>Cancel</button>
+                <button type="submit" disabled={isCreatingStudent} className="px-5 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 font-semibold hover:bg-blue-700 transition-colors">
                   {isCreatingStudent ? 'Creating...' : 'Create Student'}
                 </button>
               </div>
@@ -1257,7 +1357,7 @@ export default function TeacherDashboard() {
                   </div>
                   <p className="text-slate-700 dark:text-slate-300 mb-3">{notice.message}</p>
                   <div className="text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 w-fit px-3 py-1 rounded-full">
-                    Target: {notice.targetType === 'batch' ? `Batch (${notice.targetId})` : `Student ID (${notice.targetId})`}
+                    Target: {notice.targetType === 'classGroup' || notice.targetType === 'batch' ? `Class Group (${notice.targetId})` : `Student ID (${notice.targetId})`}
                   </div>
                 </div>
               ))
@@ -1277,7 +1377,7 @@ export default function TeacherDashboard() {
               try {
                 await api.createNotice(newNotice);
                 setShowNoticeModal(false);
-                setNewNotice({ title: '', message: '', targetType: 'batch', targetId: '' });
+                setNewNotice({ title: '', message: '', targetType: 'classGroup', targetId: '' });
                 const updated = await api.getNotices();
                 setNotices(updated);
               } catch (err) {
@@ -1290,7 +1390,7 @@ export default function TeacherDashboard() {
               <div>
                 <label className="block text-sm mb-1 dark:text-white">Target Type</label>
                 <select value={newNotice.targetType} onChange={e => setNewNotice({...newNotice, targetType: e.target.value, targetId: e.target.value === 'low-attendance' ? 'all' : ''})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
-                  <option value="batch">Entire Batch</option>
+                  <option value="classGroup">Entire Class Group</option>
                   <option value="low-attendance">All Low Attendance Students (&lt;75%)</option>
                   <option value="student">Specific Student</option>
                 </select>
@@ -1301,8 +1401,8 @@ export default function TeacherDashboard() {
                   <label className="block text-sm mb-1 dark:text-white">Select Target</label>
                   <select required value={newNotice.targetId} onChange={e => setNewNotice({...newNotice, targetId: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                     <option value="" disabled>Select...</option>
-                    {newNotice.targetType === 'batch' ? (
-                      classrooms.map(b => (
+                    {newNotice.targetType === 'classGroup' ? (
+                      batches.map(b => (
                         <option key={b.id} value={b.name}>{b.name}</option>
                       ))
                     ) : (
@@ -1370,22 +1470,19 @@ export default function TeacherDashboard() {
                     className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Branch</label>
-                  <input value={editingStudent.branch || ''} onChange={e => setEditingStudent({...editingStudent, branch: e.target.value})}
-                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <label className="block text-sm font-medium text-slate-450 dark:text-slate-400 mb-1">Branch (Locked)</label>
+                  <input disabled value={editingStudent.branch || ''}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-450 text-sm outline-none cursor-not-allowed" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Section</label>
-                  <input value={editingStudent.section || ''} onChange={e => setEditingStudent({...editingStudent, section: e.target.value})}
-                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <label className="block text-sm font-medium text-slate-450 dark:text-slate-400 mb-1">Section (Locked)</label>
+                  <input disabled value={editingStudent.section || ''}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-450 text-sm outline-none cursor-not-allowed" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Batch</label>
-                  <select value={editingStudent.batch || ''} onChange={e => setEditingStudent({...editingStudent, batch: e.target.value})}
-                    className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option value="">No batch</option>
-                    {classrooms.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-                  </select>
+                  <label className="block text-sm font-medium text-slate-455 dark:text-slate-400 mb-1">Year (Locked)</label>
+                  <input disabled value={editingStudent.year || editingStudent.batch || ''}
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-455 text-sm outline-none cursor-not-allowed" />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">

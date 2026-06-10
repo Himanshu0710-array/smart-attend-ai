@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const timetableSchema = new mongoose.Schema({
-  batch: { type: String, required: true, unique: true },
+  classGroup: { type: String, required: true, unique: true },
   schedule: [{
     date: { type: String, required: true },
     slots: [{
