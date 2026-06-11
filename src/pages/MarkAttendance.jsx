@@ -168,74 +168,100 @@ export default function MarkAttendance() {
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        setLocation({ latitude, longitude, accuracy });
-        setLastChecked(new Date());
-
-        // --- Location check: Encompassing Circle Algorithm ---
-        let isInside = false;
-        let dist = null;
-        const gpsAccuracy = accuracy || 0;
-        
+    // Helper to evaluate a coordinate against strict boundaries
+    const evaluateLocation = (latitude, longitude) => {
         let centerLat = selectedSession.lat;
         let centerLon = selectedSession.lon;
-        let roomRadius = selectedSession.radius || 30; // legacy default
-        
+        let roomRadius = selectedSession.radius || 30;
         if (selectedSession.lat_min != null) {
-            // Calculate center of the bounding box
             centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
             centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
-            
-            // Calculate maximum distance to any corner to get the encompassing radius
             const distMax = Math.max(
               getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_max),
               getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min)
             );
-            
-            // Add a generous 15m baseline buffer for drawing inaccuracies
             roomRadius = Math.max(distMax, 10) + 15;
         }
-
-        dist = getDistance(latitude, longitude, centerLat, centerLon);
-
-        // Enforce strict boundaries based on classroom size ONLY.
-        // No leniency for GPS accuracy, as requested by the user.
+        const dist = getDistance(latitude, longitude, centerLat, centerLon);
         const totalAllowed = Math.round(roomRadius);
-        
-        isInside = dist <= totalAllowed;
+        return { isInside: dist <= totalAllowed, dist, totalAllowed };
+    };
 
-        setDistance(dist !== null ? Math.round(dist) : null);
-        setAllowedDistance(totalAllowed);
+    // Use watchPosition for up to 10 seconds to allow GPS to "settle"
+    let watchId;
+    let bestPosition = null;
+    let bestEval = null;
+    
+    const finishCheck = async (pos, evalResult) => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      
+      const { latitude, longitude, accuracy } = pos.coords;
+      const { isInside, dist, totalAllowed } = evalResult;
 
-        try {
-          if (isInside) {
-            if (myStatus === 'Absent' || !myStatus) {
-              const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
-              const fp = await getDeviceFingerprint();
-              await api.markAttendance(selectedSession.id, studentUid, dist ?? 0, elapsed > 10, fp);
-            } else {
-              await api.reverifyAttendance(selectedSession.id, studentUid, true, dist ?? 0);
-            }
+      setLocation({ latitude, longitude, accuracy });
+      setLastChecked(new Date());
+      setDistance(dist !== null ? Math.round(dist) : null);
+      setAllowedDistance(totalAllowed);
+
+      try {
+        if (isInside) {
+          if (myStatus === 'Absent' || !myStatus) {
+            const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
+            const fp = await getDeviceFingerprint();
+            await api.markAttendance(selectedSession.id, studentUid, dist ?? 0, elapsed > 10, fp);
           } else {
-            if (myStatus && myStatus !== 'Absent') {
-              await api.reverifyAttendance(selectedSession.id, studentUid, false, dist ?? 0);
-            }
+            await api.reverifyAttendance(selectedSession.id, studentUid, true, dist ?? 0);
           }
-          // Re-fetch status
-          const records = await api.getSessionRecords(selectedSession.id);
-          setMyStatus(records[studentUid]?.status || 'Absent');
-          setCheckResult(isInside ? 'inside' : 'outside');
-        } catch (e) {
-          console.error('Failed to update attendance:', e);
-          setDeviceError(e.error || 'Failed to communicate with server.');
-          setCheckResult('device_error');
+        } else {
+          if (myStatus && myStatus !== 'Absent') {
+            await api.reverifyAttendance(selectedSession.id, studentUid, false, dist ?? 0);
+          }
+        }
+        const records = await api.getSessionRecords(selectedSession.id);
+        setMyStatus(records[studentUid]?.status || 'Absent');
+        setCheckResult(isInside ? 'inside' : 'outside');
+      } catch (e) {
+        console.error('Failed to update attendance:', e);
+        setDeviceError(e.error || 'Failed to communicate with server.');
+        setCheckResult('device_error');
+      }
+      setLoading(false);
+    };
+
+    const timeoutId = setTimeout(() => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      if (bestPosition && bestEval) {
+        finishCheck(bestPosition, bestEval);
+      } else {
+        setLocationError('Location request timed out. Please ensure GPS is enabled and try again.');
+        setLoading(false);
+      }
+    }, 10000); // Wait up to 10 seconds for GPS to settle
+
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const evalResult = evaluateLocation(latitude, longitude);
+        
+        // Update best position (prefer inside, otherwise closest distance)
+        if (!bestEval || evalResult.isInside || evalResult.dist < bestEval.dist) {
+          bestPosition = position;
+          bestEval = evalResult;
         }
 
-        setLoading(false);
+        // If we are strictly inside, we don't need to wait the full 10 seconds!
+        if (evalResult.isInside) {
+          clearTimeout(timeoutId);
+          finishCheck(position, evalResult);
+        }
       },
       (error) => {
+        // If we already got a fallback position before the error, don't fail immediately
+        if (bestPosition) return; 
+        
+        clearTimeout(timeoutId);
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+        
         let msg = 'Unable to get your location.';
         if (error.code === 1) msg = 'Location permission denied. Please enable GPS.';
         else if (error.code === 2) msg = 'Position unavailable. Check your GPS signal.';
@@ -243,7 +269,7 @@ export default function MarkAttendance() {
         setLocationError(msg);
         setLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, maximumAge: 0 }
     );
   }, [selectedSession, studentUid, myStatus]);
 
@@ -333,9 +359,10 @@ export default function MarkAttendance() {
       )}
 
       {loading && (
-        <div className="text-center py-8">
-          <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-400 font-medium">Checking your location...</p>
+        <div className="text-center py-8 animate-pulse">
+          <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 dark:text-slate-400 font-medium">Acquiring precise GPS lock...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">Allowing satellite signal to settle (up to 10s)</p>
         </div>
       )}
 
