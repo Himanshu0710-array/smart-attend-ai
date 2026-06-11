@@ -15,15 +15,25 @@ const sessionSchema = new mongoose.Schema({
   lon: { type: Number },
   radius: { type: Number },
 
-  // Classroom bounding box (copied from selected classroom on session start)
+  // Classroom bounding box and 4 corners (copied from selected classroom on session start)
   lat_min: { type: Number },
   lat_max: { type: Number },
   lon_min: { type: Number },
   lon_max: { type: Number },
 
+  c1_lat: { type: Number },
+  c1_lon: { type: Number },
+  c2_lat: { type: Number },
+  c2_lon: { type: Number },
+  c3_lat: { type: Number },
+  c3_lon: { type: Number },
+  c4_lat: { type: Number },
+  c4_lon: { type: Number },
+
   startTime: { type: String, required: true },
   endTime: { type: String },
   status: { type: String, required: true, enum: ['active', 'ended'], default: 'active' },
+  reverifyInterval: { type: Number, default: 20 },
 }, { timestamps: true });
 
 export const Session = mongoose.model('Session', sessionSchema);

@@ -71,8 +71,8 @@ export const deleteSubject = (id) => request(`/admin/subjects/${id}`, { method: 
 
 // Sessions — now takes year/section/branch instead of classId
 export const getSessions = (section) => request(`/sessions${section ? `?section=${section}` : ''}`);
-export const startSession = (year, section, branch, classroomId, teacherName, subject, lat, lon) =>
-  request('/sessions', { method: 'POST', body: JSON.stringify({ year, section, branch, classroomId, teacherName, subject, lat, lon }) });
+export const startSession = (year, section, branch, classroomId, teacherName, subject, lat, lon, reverifyInterval) =>
+  request('/sessions', { method: 'POST', body: JSON.stringify({ year, section, branch, classroomId, teacherName, subject, lat, lon, reverifyInterval }) });
 export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { method: 'DELETE' });
 
 // Attendance

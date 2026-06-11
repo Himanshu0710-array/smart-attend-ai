@@ -567,10 +567,9 @@ app.post('/api/admin/users/:uid/reset-device', requireAuth, async (req, res) => 
       }
     }
 
-    student.deviceFingerprint = undefined;
-    await student.save();
-    console.log(`🔓 Device fingerprint reset for ${student.name} by ${req.user.email}`);
-    res.json({ success: true, message: 'Device fingerprint reset successfully' });
+      await User.updateOne({ uid }, { $unset: { deviceFingerprint: "" } });
+      console.log(`📱 Device fingerprint reset for ${student.name} by ${req.user.email}`);
+      res.json({ success: true, message: 'Device fingerprint reset successfully' });
   } catch (error) {
     console.error('Reset device error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -986,7 +985,7 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Only teachers can start sessions' });
 
-    const { year, section, branch, classroomId, teacherName, subject, lat, lon, radius } = req.body;
+    const { year, section, branch, classroomId, teacherName, subject, lat, lon, radius, reverifyInterval } = req.body;
 
     // Validate required fields
     if (!year || !section || !branch) {
@@ -1071,7 +1070,8 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
       lon_max: lonMax,
       c1_lat, c1_lon, c2_lat, c2_lon, c3_lat, c3_lon, c4_lat, c4_lon,
       startTime: new Date().toISOString(),
-      status: 'active'
+      status: 'active',
+      reverifyInterval: reverifyInterval !== undefined ? reverifyInterval : 20
     });
     await newSession.save();
 

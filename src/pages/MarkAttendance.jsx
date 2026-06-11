@@ -317,10 +317,10 @@ export default function MarkAttendance() {
     );
   }, [selectedSession, studentUid, myStatus]);
 
-  // Reverification timer (every 20 minutes)
+  // Reverification timer (every X minutes)
   useEffect(() => {
     if (checkResult === 'inside' && selectedSession) {
-      const REVERIFY_INTERVAL = 20 * 60 * 1000;
+      const REVERIFY_INTERVAL = (selectedSession.reverifyInterval || 20) * 60 * 1000;
       setNextReverify(new Date(Date.now() + REVERIFY_INTERVAL));
       const timer = setInterval(() => {
         setNextReverify(new Date(Date.now() + REVERIFY_INTERVAL));

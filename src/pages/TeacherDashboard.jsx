@@ -42,6 +42,38 @@ export default function TeacherDashboard() {
   const [studentList, setStudentList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
+  const [reverifyInterval, setReverifyInterval] = useState(20);
+
+  // Auto-end session on tab close/refresh
+  useEffect(() => {
+    if (!activeSession) return;
+    
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = ''; // Required for warning prompt
+    };
+
+    const handleUnload = () => {
+      const API_BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api';
+      const token = localStorage.getItem('smartattend_token');
+      // Use keepalive to ensure the request is completed even when the tab closes
+      fetch(`${API_BASE}/sessions/${activeSession.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        keepalive: true
+      }).catch(() => {});
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [activeSession]);
 
   // History State
   const [historySessions, setHistorySessions] = useState([]);
@@ -339,7 +371,8 @@ export default function TeacherDashboard() {
         teacherName,
         selectedSubject,
         undefined, // lat
-        undefined  // lon
+        undefined, // lon
+        reverifyInterval
       );
       setActiveSession(session);
     } catch (e) {
@@ -766,6 +799,19 @@ export default function TeacherDashboard() {
                     );
                   })()}
                 </select>
+              </div>
+
+              <div className="flex-1 min-w-[120px] max-w-[150px] w-full">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5" title="Time in minutes between GPS reverifications">Reverify (Mins)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="120"
+                  value={reverifyInterval}
+                  onChange={(e) => setReverifyInterval(Number(e.target.value) || 20)}
+                  disabled={!!activeSession}
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all disabled:opacity-50 font-medium"
+                />
               </div>
 
               {!activeSession ? (
