@@ -5,8 +5,24 @@ import { useToast } from '../contexts/ToastContext';
 import BulkImportModal from '../components/BulkImportModal';
 import {
   Users, UserPlus, MapPin, BarChart3, Search,
-  Pencil, Trash2, GraduationCap, Building2, FileSpreadsheet, LocateFixed, Save, X, Shield, ShieldCheck
+  Pencil, Trash2, GraduationCap, Building2, FileSpreadsheet, LocateFixed, Save, X, Shield, ShieldCheck, FileText, XCircle, Loader2, Calendar as CalendarIcon, CheckCircle, Clock, AlertTriangle, AlertCircle
 } from 'lucide-react';
+
+const statusStyles = {
+  'Present': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  'Absent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  'Late Entry': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  'Left Early': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  'Partial': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+};
+
+const statusIcons = {
+  'Present': CheckCircle,
+  'Absent': XCircle,
+  'Late Entry': Clock,
+  'Left Early': AlertTriangle,
+  'Partial': AlertCircle,
+};
 
 export default function AdminDashboard() {
   const { userData } = useAuth();
@@ -54,6 +70,12 @@ export default function AdminDashboard() {
   // CC assignment state (in edit user modal)
   const [ccForm, setCcForm] = useState({ isCC: false, ccSection: '', ccBranch: 'CSE', ccYear: '1st Year' });
   const [savingCC, setSavingCC] = useState(false);
+
+  // Student history modal
+  const [showStudentHistoryModal, setShowStudentHistoryModal] = useState(false);
+  const [historyStudent, setHistoryStudent] = useState(null);
+  const [studentHistoryData, setStudentHistoryData] = useState([]);
+  const [loadingStudentHistory, setLoadingStudentHistory] = useState(false);
 
   const [detectingGPS, setDetectingGPS] = useState(null); // stores corner identifier like 'c1', 'c2', 'c3', 'c4' or false
 
@@ -328,8 +350,22 @@ export default function AdminDashboard() {
         toast.error('Could not get location. Please enable GPS permissions.');
         setDetectingGPS(null);
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
+  };
+
+  const handleViewHistory = async (student) => {
+    setHistoryStudent(student);
+    setShowStudentHistoryModal(true);
+    setLoadingStudentHistory(true);
+    try {
+      const history = await api.getStudentHistory(student.uid);
+      setStudentHistoryData(history);
+    } catch (err) {
+      toast.error('Failed to load history');
+    } finally {
+      setLoadingStudentHistory(false);
+    }
   };
 
   const students = users.filter(u => u.role === 'student');
@@ -501,7 +537,12 @@ export default function AdminDashboard() {
                     <td className="py-3 px-3 text-sm text-slate-600 dark:text-slate-300">{user.section || '-'}</td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1">
-                        <button onClick={() => openEditModal(user)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-blue-500 transition-colors">
+                        {user.role === 'student' && (
+                          <button onClick={() => handleViewHistory(user)} className="p-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 text-slate-400 hover:text-purple-500 transition-colors" title="View History">
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button onClick={() => openEditModal(user)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-blue-500 transition-colors" title="Edit user">
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button onClick={() => handleDeleteUser(user.uid, user.name)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition-colors">
@@ -972,6 +1013,76 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Student History Modal ── */}
+      {showStudentHistoryModal && historyStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/30">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-purple-500" /> {historyStudent.name}'s Attendance History
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Roll No: {historyStudent.rollNumber || 'N/A'}</p>
+              </div>
+              <button onClick={() => { setShowStudentHistoryModal(false); setHistoryStudent(null); setStudentHistoryData([]); }} className="p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 flex-1 overflow-y-auto">
+              {loadingStudentHistory ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+                  <p className="text-slate-500">Loading history...</p>
+                </div>
+              ) : studentHistoryData.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  <CalendarIcon className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                  <p className="text-slate-500 font-medium">No attendance records found.</p>
+                </div>
+              ) : (
+                <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800">
+                      <tr>
+                        <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Date</th>
+                        <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Subject</th>
+                        <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Status</th>
+                        <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                      {studentHistoryData.map((record, i) => {
+                        const Icon = statusIcons[record.status] || XCircle;
+                        return (
+                          <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                            <td className="py-3 px-4 text-slate-700 dark:text-slate-300 whitespace-nowrap">{record.date}</td>
+                            <td className="py-3 px-4 text-slate-900 dark:text-white font-medium">{record.subject}</td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${statusStyles[record.status] || ''}`}>
+                                <Icon className="w-3.5 h-3.5" /> {record.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">{record.time}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 flex justify-end">
+              <button 
+                onClick={() => { setShowStudentHistoryModal(false); setHistoryStudent(null); setStudentHistoryData([]); }}
+                className="px-5 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
