@@ -168,8 +168,8 @@ export default function MarkAttendance() {
       return;
     }
 
-    // Helper to evaluate a coordinate against strict boundaries
-    const evaluateLocation = (latitude, longitude) => {
+    // Helper to evaluate a coordinate against strict boundaries with a smart indoor buffer
+    const evaluateLocation = (latitude, longitude, gpsAccuracy) => {
         let centerLat = selectedSession.lat;
         let centerLon = selectedSession.lon;
         let roomRadius = selectedSession.radius || 30;
@@ -183,7 +183,13 @@ export default function MarkAttendance() {
             roomRadius = Math.max(distMax, 1);
         }
         const dist = getDistance(latitude, longitude, centerLat, centerLon);
-        const totalAllowed = Math.round(roomRadius);
+        
+        // Smart indoor GPS drift buffer: 
+        // We use the phone's reported accuracy error, but cap it at 15 meters 
+        // to prevent students from marking attendance from too far away.
+        const dynamicBuffer = Math.min(gpsAccuracy || 0, 15);
+        const totalAllowed = Math.round(roomRadius + dynamicBuffer);
+        
         return { isInside: dist <= totalAllowed, dist, totalAllowed };
     };
 
@@ -240,8 +246,8 @@ export default function MarkAttendance() {
 
     watchId = navigator.geolocation.watchPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
-        const evalResult = evaluateLocation(latitude, longitude);
+        const { latitude, longitude, accuracy } = position.coords;
+        const evalResult = evaluateLocation(latitude, longitude, accuracy);
         
         // Update best position (prefer inside, otherwise closest distance)
         if (!bestEval || evalResult.isInside || evalResult.dist < bestEval.dist) {
