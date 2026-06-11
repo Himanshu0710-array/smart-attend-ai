@@ -200,11 +200,9 @@ export default function MarkAttendance() {
 
         dist = getDistance(latitude, longitude, centerLat, centerLon);
 
-        // Cap accuracy buffer to 500m to allow Wi-Fi/Network location indoors, but prevent extreme spoofing
-        const ACCURACY_BUFFER = Math.min(gpsAccuracy, 500);
-        
-        // Total allowed distance from center
-        const totalAllowed = Math.round(roomRadius + ACCURACY_BUFFER);
+        // Enforce strict boundaries based on classroom size ONLY.
+        // No leniency for GPS accuracy, as requested by the user.
+        const totalAllowed = Math.round(roomRadius);
         
         isInside = dist <= totalAllowed;
 
