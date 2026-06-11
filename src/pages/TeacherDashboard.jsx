@@ -323,6 +323,12 @@ export default function TeacherDashboard() {
         return;
       }
       
+      if (!selectedClassroomId) {
+        setLocationError('Please select a Classroom. Without a classroom, students cannot mark attendance.');
+        setLoading(false);
+        return;
+      }
+      
       // We no longer send the teacher's current location, because the classroom
       // coordinates (selectedClassroomId) dictate the attendance boundary.
       const session = await api.startSession(
