@@ -568,49 +568,50 @@ export default function TeacherDashboard() {
                         {student.branch || '-'}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        {userData?.isCC && 
-                         String(student.year || '').toLowerCase() === String(userData.ccYear || '').toLowerCase() && 
-                         String(student.section || '').toLowerCase() === String(userData.ccSection || '').toLowerCase() && 
-                         String(student.branch || '').toLowerCase() === String(userData.ccBranch || '').toLowerCase() ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
-                              className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 transition-colors" title="Edit student"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => { setResetPasswordStudent(student); setNewPasswordValue(''); setShowResetPasswordModal(true); }}
-                              className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Reset password"
-                            >
-                              <KeyRound className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (window.confirm(`Reset bound device for ${student.name}?`)) {
-                                  try {
-                                    await api.resetDeviceFingerprint(student.uid);
-                                    toast.success(`Device reset for ${student.name}`);
-                                  } catch (e) {
-                                    toast.error(e.error || 'Failed to reset device');
-                                  }
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={async () => {
+                              if (window.confirm(`Reset bound device for ${student.name}?`)) {
+                                try {
+                                  await api.resetDeviceFingerprint(student.uid);
+                                  toast.success(`Device reset for ${student.name}`);
+                                } catch (e) {
+                                  toast.error(e.error || 'Failed to reset device');
                                 }
-                              }}
-                              className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                              title="Reset device fingerprint"
-                            >
-                              Reset Device
-                            </button>
-                            <button
-                              onClick={() => handleDeleteStudent(student)}
-                              className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Delete student"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">—</span>
-                        )}
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                            title="Reset device fingerprint"
+                          >
+                            Reset Device
+                          </button>
+                          
+                          {userData?.isCC && 
+                           String(student.year || '').toLowerCase() === String(userData.ccYear || '').toLowerCase() && 
+                           String(student.section || '').toLowerCase() === String(userData.ccSection || '').toLowerCase() && 
+                           String(student.branch || '').toLowerCase() === String(userData.ccBranch || '').toLowerCase() && (
+                            <>
+                              <button
+                                onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
+                                className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-slate-400 hover:text-blue-500 transition-colors" title="Edit student"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => { setResetPasswordStudent(student); setNewPasswordValue(''); setShowResetPasswordModal(true); }}
+                                className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Reset password"
+                              >
+                                <KeyRound className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteStudent(student)}
+                                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Delete student"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

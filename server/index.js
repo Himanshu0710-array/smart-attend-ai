@@ -550,11 +550,11 @@ app.post('/api/admin/users/:uid/reset-device', requireAuth, async (req, res) => 
     const student = await User.findOne({ uid, role: 'student' });
     if (!student) return res.status(404).json({ error: 'Student not found' });
 
-    // Non-admin teachers: check coordinator section access
+    // Non-admin teachers: check if they have access to the student
     if (req.user.role === 'teacher') {
       const teacherUser = await User.findOne({ uid: req.user.uid });
-      if (!isTeacherCCForStudent(teacherUser, student)) {
-        return res.status(403).json({ error: 'Access denied: You are not the Class Coordinator for this student\'s section' });
+      if (!canTeacherAccessStudent(teacherUser, student)) {
+        return res.status(403).json({ error: 'Access denied: You do not have access to this student' });
       }
     }
 
