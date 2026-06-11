@@ -180,7 +180,7 @@ export default function MarkAttendance() {
               getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_max),
               getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min)
             );
-            roomRadius = Math.max(distMax, 10) + 15;
+            roomRadius = Math.max(distMax, 1);
         }
         const dist = getDistance(latitude, longitude, centerLat, centerLon);
         const totalAllowed = Math.round(roomRadius);
