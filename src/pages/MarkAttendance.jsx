@@ -168,29 +168,65 @@ export default function MarkAttendance() {
       return;
     }
 
+    // Ray-casting algorithm for point in polygon
+    const isPointInPolygon = (lat, lon, polygon) => {
+        let isInside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i].lat, yi = polygon[i].lon;
+            const xj = polygon[j].lat, yj = polygon[j].lon;
+            const intersect = ((yi > lon) !== (yj > lon))
+                && (lat < (xj - xi) * (lon - yi) / (yj - yi) + xi);
+            if (intersect) isInside = !isInside;
+        }
+        return isInside;
+    };
+
     // Helper to evaluate a coordinate against strict boundaries with a smart indoor buffer
     const evaluateLocation = (latitude, longitude, gpsAccuracy) => {
         let centerLat = selectedSession.lat;
         let centerLon = selectedSession.lon;
         let roomRadius = selectedSession.radius || 30;
+        let isInsidePolygon = false;
+        let hasPolygon = false;
+
+        if (selectedSession.c1_lat != null && selectedSession.c2_lat != null && 
+            selectedSession.c3_lat != null && selectedSession.c4_lat != null) {
+            hasPolygon = true;
+            const polygon = [
+                { lat: selectedSession.c1_lat, lon: selectedSession.c1_lon },
+                { lat: selectedSession.c2_lat, lon: selectedSession.c2_lon },
+                { lat: selectedSession.c3_lat, lon: selectedSession.c3_lon },
+                { lat: selectedSession.c4_lat, lon: selectedSession.c4_lon }
+            ];
+            isInsidePolygon = isPointInPolygon(latitude, longitude, polygon);
+        }
+
         if (selectedSession.lat_min != null) {
             centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
             centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
             const distMax = Math.max(
               getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_max),
-              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min)
+              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min),
+              getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_min),
+              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_max)
             );
             roomRadius = Math.max(distMax, 1);
         }
+        
         const dist = getDistance(latitude, longitude, centerLat, centerLon);
         
-        // Smart indoor GPS drift buffer: 
-        // We use the phone's reported accuracy error, but cap it at 15 meters 
-        // to prevent students from marking attendance from too far away.
-        const dynamicBuffer = Math.min(gpsAccuracy || 0, 15);
+        const acc = gpsAccuracy || 0;
+        const dynamicBuffer = acc > 10 ? Math.min((acc - 10) * 0.5, 10) : 0;
         const totalAllowed = Math.round(roomRadius + dynamicBuffer);
         
-        return { isInside: dist <= totalAllowed, dist, totalAllowed };
+        let isInside = false;
+        if (hasPolygon) {
+            isInside = isInsidePolygon;
+        } else {
+            isInside = dist <= totalAllowed;
+        }
+        
+        return { isInside, dist, totalAllowed };
     };
 
     // Use watchPosition for up to 10 seconds to allow GPS to "settle"
@@ -214,7 +250,7 @@ export default function MarkAttendance() {
           if (myStatus === 'Absent' || !myStatus) {
             const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
             const fp = await getDeviceFingerprint();
-            await api.markAttendance(selectedSession.id, studentUid, dist ?? 0, elapsed > 10, fp);
+            await api.markAttendance(selectedSession.id, studentUid, latitude, longitude, dist ?? 0, elapsed > 10, fp);
           } else {
             await api.reverifyAttendance(selectedSession.id, studentUid, true, dist ?? 0);
           }
@@ -249,14 +285,14 @@ export default function MarkAttendance() {
         const { latitude, longitude, accuracy } = position.coords;
         const evalResult = evaluateLocation(latitude, longitude, accuracy);
         
-        // Update best position (prefer inside, otherwise closest distance)
-        if (!bestEval || evalResult.isInside || evalResult.dist < bestEval.dist) {
+        // Always prefer the position with the lowest accuracy value (best GPS fix)
+        if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
           bestPosition = position;
           bestEval = evalResult;
         }
 
-        // If we are strictly inside, we don't need to wait the full 10 seconds!
-        if (evalResult.isInside) {
+        // Only early-exit if inside AND accuracy is good
+        if (evalResult.isInside && accuracy <= 20) {
           clearTimeout(timeoutId);
           finishCheck(position, evalResult);
         }

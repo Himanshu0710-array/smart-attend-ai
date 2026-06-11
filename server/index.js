@@ -14,6 +14,15 @@ import { Subject } from './models/Subject.js';
 import { SystemConfig } from './models/SystemConfig.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const toRad = (deg) => (parseFloat(deg) * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
 dotenv.config();
 
 const app = express();
@@ -1146,7 +1155,7 @@ app.get('/api/attendance/:sessionId', requireAuth, async (req, res) => {
 app.post('/api/attendance/mark', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'student') return res.status(403).json({ error: 'Only students can mark attendance' });
-    const { sessionId, studentUid, distance, isLate, deviceFingerprint } = req.body;
+    const { sessionId, studentUid, lat, lon, distance, isLate, deviceFingerprint } = req.body;
     
     // Extra security check to prevent students from marking other students
     if (req.user.uid !== studentUid) return res.status(403).json({ error: 'Cannot mark attendance for another student' });
@@ -1180,6 +1189,21 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
       const student = await User.findOne({ uid: studentUid });
       const session = await Session.findOne({ id: sessionId });
       if (!student || !session) return res.status(404).json({ error: 'Student or Session not found' });
+
+      // Server-side location validation
+      let centerLat = session.lat;
+      let centerLon = session.lon;
+      if (session.lat_min != null) {
+        centerLat = (session.lat_min + session.lat_max) / 2;
+        centerLon = (session.lon_min + session.lon_max) / 2;
+      }
+      if (lat != null && lon != null) {
+        const serverDist = getDistance(lat, lon, centerLat, centerLon);
+        const allowed = (session.radius || 30) + 15; // 15m server-side tolerance
+        if (serverDist > allowed) {
+          return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
+        }
+      }
 
       record = new Attendance({
         sessionId,
@@ -1216,14 +1240,14 @@ app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
 
     if (isInsideGeofence) {
       record.distance = `${Math.round(distance)}m`;
-      record.reverifications += 1;
+      record.reverifications = (record.reverifications || 0) + 1;
       record.missedReverifications = 0;
       if (record.status === 'Left Early') {
         record.status = 'Present';
       }
     } else {
       record.distance = `${Math.round(distance)}m`;
-      record.missedReverifications += 1;
+      record.missedReverifications = (record.missedReverifications || 0) + 1;
       if (record.missedReverifications >= 2) {
         record.status = 'Left Early';
       }
