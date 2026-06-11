@@ -319,7 +319,7 @@ app.post('/api/admin/users', requireAuth, async (req, res) => {
       email: email.trim().toLowerCase(),
       password: hashedPassword,
       role,
-      rollNumber,
+      rollNumber: rollNumber?.trim() || undefined,
       section: section?.trim() || undefined,
       branch: branch?.trim() || undefined,
       year: year || undefined,

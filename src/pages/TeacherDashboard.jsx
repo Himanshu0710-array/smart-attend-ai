@@ -65,6 +65,7 @@ export default function TeacherDashboard() {
   const [newStudent, setNewStudent] = useState({ name: '', email: '', password: '', rollNumber: '', section: '', branch: '', year: '' });
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   const [studentListForTeacher, setStudentListForTeacher] = useState([]);
+  const [manageStudentSectionFilter, setManageStudentSectionFilter] = useState('');
   // Edit student state
   const [showEditStudentModal, setShowEditStudentModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -526,6 +527,17 @@ export default function TeacherDashboard() {
                 <Users className="w-6 h-6 text-blue-500" /> Manage Students
               </h2>
               <p className="text-sm text-slate-500 mt-1">View and register new students to your classes.</p>
+              
+              <div className="mt-4 flex items-center gap-2">
+                <label className="text-sm text-slate-600 dark:text-slate-400 font-medium">Filter by Section:</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. A" 
+                  value={manageStudentSectionFilter} 
+                  onChange={(e) => setManageStudentSectionFilter(e.target.value)}
+                  className="px-3 py-1.5 border rounded-lg text-sm dark:bg-slate-800 dark:border-slate-700 dark:text-white w-32 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
             </div>
             {userData?.isCC && (
               <div className="flex flex-wrap gap-2 shrink-0">
@@ -552,7 +564,9 @@ export default function TeacherDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {studentListForTeacher.map((student) => (
+                  {studentListForTeacher
+                    .filter(s => !manageStudentSectionFilter || (s.section || '').toLowerCase() === manageStudentSectionFilter.toLowerCase().trim())
+                    .map((student) => (
                     <tr key={student.uid} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
                       <td className="py-3 px-4 text-slate-900 dark:text-white font-medium flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
