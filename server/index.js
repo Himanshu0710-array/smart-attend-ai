@@ -1218,6 +1218,9 @@ app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
       record.distance = `${Math.round(distance)}m`;
       record.reverifications += 1;
       record.missedReverifications = 0;
+      if (record.status === 'Left Early') {
+        record.status = 'Present';
+      }
     } else {
       record.distance = `${Math.round(distance)}m`;
       record.missedReverifications += 1;
