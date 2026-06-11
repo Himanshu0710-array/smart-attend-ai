@@ -216,7 +216,9 @@ export default function MarkAttendance() {
         const dist = getDistance(latitude, longitude, centerLat, centerLon);
         
         const acc = gpsAccuracy || 0;
-        const dynamicBuffer = acc > 10 ? Math.min((acc - 10) * 0.5, 10) : 0;
+        const dynamicBuffer = acc > 20
+          ? Math.min((acc - 20) * 0.3, 5)
+          : 0;
         const totalAllowed = Math.round(roomRadius + dynamicBuffer);
         
         let isInside = false;
