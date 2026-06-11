@@ -6,7 +6,7 @@ import { MapPin, CheckCircle, XCircle, Loader2, Wifi, RefreshCw, ShieldCheck, Ca
 // Haversine formula
 function getDistance(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
-  const toRad = (deg) => (deg * Math.PI) / 180;
+  const toRad = (deg) => (parseFloat(deg) * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
@@ -17,19 +17,7 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Ray-casting algorithm for point-in-polygon
-function isPointInPolygon(point, vs) {
-  const x = point[0], y = point[1];
-  let inside = false;
-  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
-    const xi = vs[i][0], yi = vs[i][1];
-    const xj = vs[j][0], yj = vs[j][1];
-    const intersect = ((yi > y) !== (yj > y))
-        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
+// Ray-casting algorithm removed due to unreliability with bowtie polygons
 
 // Audio fingerprint — differs even between two identical phones due to
 // hardware-level differences in the audio processing chip
@@ -112,6 +100,7 @@ export default function MarkAttendance() {
   const [loading, setLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [distance, setDistance] = useState(null);
+  const [allowedDistance, setAllowedDistance] = useState(null);
   const [lastChecked, setLastChecked] = useState(null);
   const [nextReverify, setNextReverify] = useState(null);
   const [myStatus, setMyStatus] = useState(null);
@@ -185,51 +174,42 @@ export default function MarkAttendance() {
         setLocation({ latitude, longitude, accuracy });
         setLastChecked(new Date());
 
-        // --- Location check: polygon (preferred) or legacy radius fallback ---
+        // --- Location check: Encompassing Circle Algorithm ---
         let isInside = false;
         let dist = null;
         const gpsAccuracy = accuracy || 0;
-        const ACCURACY_BUFFER = Math.min(gpsAccuracy, 50); // Cap the buffer to avoid spoofing from very far away
-
-        // Calculate a center point to determine distance for UI feedback
+        
         let centerLat = selectedSession.lat;
         let centerLon = selectedSession.lon;
+        let roomRadius = selectedSession.radius || 30; // legacy default
+        
         if (selectedSession.lat_min != null) {
+            // Calculate center of the bounding box
             centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
             centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
+            
+            // Calculate maximum distance to any corner to get the encompassing radius
+            const distMax = Math.max(
+              getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_max),
+              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min)
+            );
+            
+            // Add a generous 15m baseline buffer for drawing inaccuracies
+            roomRadius = Math.max(distMax, 10) + 15;
         }
-        
+
         dist = getDistance(latitude, longitude, centerLat, centerLon);
 
-        if (selectedSession.c1_lat != null) {
-          // Precise classroom polygon check
-          const vs = [
-            [selectedSession.c1_lat, selectedSession.c1_lon],
-            [selectedSession.c2_lat, selectedSession.c2_lon],
-            [selectedSession.c3_lat, selectedSession.c3_lon],
-            [selectedSession.c4_lat, selectedSession.c4_lon]
-          ];
-          isInside = isPointInPolygon([latitude, longitude], vs);
-          // Fallback: If not strictly inside the polygon, but distance is within GPS accuracy + a small room buffer (15m)
-          if (!isInside && dist <= (ACCURACY_BUFFER + 15)) {
-              isInside = true;
-          }
-        } else if (selectedSession.lat_min != null) {
-          // Precise classroom bounding box check
-          isInside = latitude  >= selectedSession.lat_min &&
-                     latitude  <= selectedSession.lat_max &&
-                     longitude >= selectedSession.lon_min &&
-                     longitude <= selectedSession.lon_max;
-          // Fallback: If not strictly inside the box, but distance is within GPS accuracy + 15m
-          if (!isInside && dist <= (ACCURACY_BUFFER + 15)) {
-              isInside = true;
-          }
-        } else {
-          // Legacy: Haversine radius check with accuracy buffer
-          isInside = dist <= (selectedSession.radius + ACCURACY_BUFFER);
-        }
+        // Cap accuracy buffer to 500m to allow Wi-Fi/Network location indoors, but prevent extreme spoofing
+        const ACCURACY_BUFFER = Math.min(gpsAccuracy, 500);
+        
+        // Total allowed distance from center
+        const totalAllowed = Math.round(roomRadius + ACCURACY_BUFFER);
+        
+        isInside = dist <= totalAllowed;
 
         setDistance(dist !== null ? Math.round(dist) : null);
+        setAllowedDistance(totalAllowed);
 
         try {
           if (isInside) {
@@ -377,7 +357,7 @@ export default function MarkAttendance() {
           <h3 className="text-xl font-bold text-emerald-800 dark:text-emerald-200 mb-1">Attendance Marked — {myStatus}!</h3>
           <p className="text-emerald-600 dark:text-emerald-400 text-sm">
             {distance !== null
-              ? `You are ${distance}m from the classroom (within ${selectedSession?.radius}m)`
+              ? `You are ${distance}m from the classroom (within ${allowedDistance}m)`
               : '✅ You are inside the classroom'}
           </p>
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-emerald-600/80 dark:text-emerald-400/80">
@@ -404,7 +384,7 @@ export default function MarkAttendance() {
           <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">Outside Classroom Area</h3>
           <p className="text-red-600 dark:text-red-400 text-sm">
             {distance !== null
-              ? `You are ${distance}m away (allowed: ${selectedSession?.radius}m)`
+              ? `You are ${distance}m away (allowed: ${allowedDistance}m)`
               : '❌ Your GPS is outside the classroom boundaries'}
           </p>
           <button onClick={() => { setCheckResult(null); checkLocation(); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
