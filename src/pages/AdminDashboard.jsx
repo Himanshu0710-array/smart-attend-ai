@@ -121,7 +121,14 @@ export default function AdminDashboard() {
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     try {
-      await api.updateUser(editUser.uid, editUser);
+      const payload = {
+        ...editUser,
+        isCC: ccForm.isCC,
+        ccSection: ccForm.isCC ? ccForm.ccSection : undefined,
+        ccBranch: ccForm.isCC ? ccForm.ccBranch : undefined,
+        ccYear: ccForm.isCC ? ccForm.ccYear : undefined
+      };
+      await api.updateUser(editUser.uid, payload);
       toast.success('User updated successfully!');
       setShowEditUserModal(false);
       setEditUser(null);

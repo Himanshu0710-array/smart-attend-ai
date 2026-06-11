@@ -569,9 +569,9 @@ export default function TeacherDashboard() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         {userData?.isCC && 
-                         student.year === userData.ccYear && 
-                         student.section === userData.ccSection && 
-                         student.branch === userData.ccBranch ? (
+                         String(student.year || '').toLowerCase() === String(userData.ccYear || '').toLowerCase() && 
+                         String(student.section || '').toLowerCase() === String(userData.ccSection || '').toLowerCase() && 
+                         String(student.branch || '').toLowerCase() === String(userData.ccBranch || '').toLowerCase() ? (
                           <div className="flex items-center justify-end gap-1">
                             <button
                               onClick={() => { setEditingStudent({...student}); setShowEditStudentModal(true); }}
