@@ -558,7 +558,8 @@ app.post('/api/admin/users/:uid/reset-device', requireAuth, async (req, res) => 
       }
     }
 
-    await User.findOneAndUpdate({ uid, role: 'student' }, { $unset: { deviceFingerprint: 1 } });
+    student.deviceFingerprint = undefined;
+    await student.save();
     console.log(`🔓 Device fingerprint reset for ${student.name} by ${req.user.email}`);
     res.json({ success: true, message: 'Device fingerprint reset successfully' });
   } catch (error) {
@@ -1013,6 +1014,7 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
 
     let roomName = 'Unknown';
     let latMin, latMax, lonMin, lonMax;
+    let c1_lat, c1_lon, c2_lat, c2_lon, c3_lat, c3_lon, c4_lat, c4_lon;
     let fallbackLat = lat;
     let fallbackLon = lon;
 
@@ -1024,6 +1026,14 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
         latMax = classroom.lat_max;
         lonMin = classroom.lon_min;
         lonMax = classroom.lon_max;
+        c1_lat = classroom.c1_lat;
+        c1_lon = classroom.c1_lon;
+        c2_lat = classroom.c2_lat;
+        c2_lon = classroom.c2_lon;
+        c3_lat = classroom.c3_lat;
+        c3_lon = classroom.c3_lon;
+        c4_lat = classroom.c4_lat;
+        c4_lon = classroom.c4_lon;
         if (lat === undefined) fallbackLat = (classroom.lat_min + classroom.lat_max) / 2;
         if (lon === undefined) fallbackLon = (classroom.lon_min + classroom.lon_max) / 2;
       }
@@ -1050,6 +1060,7 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
       lat_max: latMax,
       lon_min: lonMin,
       lon_max: lonMax,
+      c1_lat, c1_lon, c2_lat, c2_lon, c3_lat, c3_lon, c4_lat, c4_lon,
       startTime: new Date().toISOString(),
       status: 'active'
     });

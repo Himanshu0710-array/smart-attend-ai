@@ -17,6 +17,20 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Ray-casting algorithm for point-in-polygon
+function isPointInPolygon(point, vs) {
+  const x = point[0], y = point[1];
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i][0], yi = vs[i][1];
+    const xj = vs[j][0], yj = vs[j][1];
+    const intersect = ((yi > y) !== (yj > y))
+        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 // Audio fingerprint — differs even between two identical phones due to
 // hardware-level differences in the audio processing chip
 async function getAudioFingerprint() {
@@ -171,20 +185,48 @@ export default function MarkAttendance() {
         setLocation({ latitude, longitude, accuracy });
         setLastChecked(new Date());
 
-        // --- Location check: bounding box (preferred) or legacy radius fallback ---
-        let isInside;
+        // --- Location check: polygon (preferred) or legacy radius fallback ---
+        let isInside = false;
         let dist = null;
+        const gpsAccuracy = accuracy || 0;
+        const ACCURACY_BUFFER = Math.min(gpsAccuracy, 50); // Cap the buffer to avoid spoofing from very far away
 
+        // Calculate a center point to determine distance for UI feedback
+        let centerLat = selectedSession.lat;
+        let centerLon = selectedSession.lon;
         if (selectedSession.lat_min != null) {
+            centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
+            centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
+        }
+        
+        dist = getDistance(latitude, longitude, centerLat, centerLon);
+
+        if (selectedSession.c1_lat != null) {
+          // Precise classroom polygon check
+          const vs = [
+            [selectedSession.c1_lat, selectedSession.c1_lon],
+            [selectedSession.c2_lat, selectedSession.c2_lon],
+            [selectedSession.c3_lat, selectedSession.c3_lon],
+            [selectedSession.c4_lat, selectedSession.c4_lon]
+          ];
+          isInside = isPointInPolygon([latitude, longitude], vs);
+          // Fallback: If not strictly inside the polygon, but distance is within GPS accuracy + a small room buffer (15m)
+          if (!isInside && dist <= (ACCURACY_BUFFER + 15)) {
+              isInside = true;
+          }
+        } else if (selectedSession.lat_min != null) {
           // Precise classroom bounding box check
           isInside = latitude  >= selectedSession.lat_min &&
                      latitude  <= selectedSession.lat_max &&
                      longitude >= selectedSession.lon_min &&
                      longitude <= selectedSession.lon_max;
+          // Fallback: If not strictly inside the box, but distance is within GPS accuracy + 15m
+          if (!isInside && dist <= (ACCURACY_BUFFER + 15)) {
+              isInside = true;
+          }
         } else {
-          // Legacy: Haversine radius check
-          dist = getDistance(latitude, longitude, selectedSession.lat, selectedSession.lon);
-          isInside = dist <= selectedSession.radius;
+          // Legacy: Haversine radius check with accuracy buffer
+          isInside = dist <= (selectedSession.radius + ACCURACY_BUFFER);
         }
 
         setDistance(dist !== null ? Math.round(dist) : null);
