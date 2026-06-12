@@ -193,13 +193,14 @@ export default function MarkAttendance() {
         a = b = selectedSession.radius || 30;
       }
 
-      // Enforce a minimum physical boundary (15m radius) for real-world indoor GPS
-      a = Math.max(a, 15);
-      b = Math.max(b, 15);
+      // Enforce a minimum physical boundary (35m radius) for real-world indoor GPS
+      // Hardware limitation: concrete walls cause 20-30m GPS multipath drift
+      a = Math.max(a, 35);
+      b = Math.max(b, 35);
 
       // Expand ellipse slightly when GPS accuracy is poor
       const acc = gpsAccuracy || 0;
-      const buffer = acc > 20 ? Math.min((acc - 20) * 0.5, 10) : 0;
+      const buffer = acc > 20 ? Math.min((acc - 20) * 0.5, 15) : 0;
       a += buffer;
       b += buffer;
 
