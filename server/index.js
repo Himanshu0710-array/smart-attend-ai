@@ -1192,38 +1192,38 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
       const session = await Session.findOne({ id: sessionId });
       if (!student || !session) return res.status(404).json({ error: 'Student or Session not found' });
 
-      // ── Server-side ellipse check ──────────────────────────────────────
+      // ── Server-side circular distance check ──────────────────────────────
       // Mirrors the client formula exactly so there is no accept/reject mismatch.
-      //   a = east-west half-width  (semi-major axis, metres)
-      //   b = north-south half-height (semi-minor axis, metres)
-      //   inside if: (dx/a)² + (dy/b)² ≤ 1   (+5 m tolerance)
       if (lat != null && lon != null) {
-        let centerLat, centerLon, a, b;
-        if (session.lat_min != null && session.lat_max != null &&
-            session.lon_min != null && session.lon_max != null) {
-          centerLat = (session.lat_min + session.lat_max) / 2;
-          centerLon = (session.lon_min + session.lon_max) / 2;
-          const cosLat = Math.cos(centerLat * Math.PI / 180);
-          a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat;
-          b = (session.lat_max - session.lat_min) / 2 * 111320;
+          let centerLat, centerLon, optimalRadius;
+          if (session.lat_min != null && session.lat_max != null &&
+              session.lon_min != null && session.lon_max != null) {
+            centerLat = (session.lat_min + session.lat_max) / 2;
+            centerLon = (session.lon_min + session.lon_max) / 2;
+            const cosLat = Math.cos(centerLat * Math.PI / 180);
+            const a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat;
+            const b = (session.lat_max - session.lat_min) / 2 * 111320;
+            
+            optimalRadius = Math.max(a, b);
+            // Enforce minimum boundary (35m) + 5m server tolerance
+            optimalRadius = Math.max(optimalRadius, 35) + 5;
+          } else {
+            // Legacy session: circle fallback
+            centerLat = session.lat;
+            centerLon = session.lon;
+            optimalRadius = (session.radius || 30) + 15;
+          }
           
-          // Enforce minimum boundary (35m) + 5m server tolerance
-          a = Math.max(a, 35) + 5;
-          b = Math.max(b, 35) + 5;
-        } else {
-          // Legacy session: circle fallback
-          centerLat = session.lat;
-          centerLon = session.lon;
-          a = b = (session.radius || 30) + 15;
+          const cosLat = Math.cos(centerLat * Math.PI / 180);
+          const dx = (lon - centerLon) * 111320 * cosLat;
+          const dy = (lat - centerLat) * 111320;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          
+          const insideCircle = dist <= optimalRadius;
+          if (!insideCircle) {
+            return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
+          }
         }
-        const cosLat = Math.cos(centerLat * Math.PI / 180);
-        const dx = (lon - centerLon) * 111320 * cosLat;
-        const dy = (lat - centerLat) * 111320;
-        const insideEllipse = (dx / a) ** 2 + (dy / b) ** 2 <= 1;
-        if (!insideEllipse) {
-          return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
-        }
-      }
 
       record = new Attendance({
         sessionId,

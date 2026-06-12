@@ -193,27 +193,22 @@ export default function MarkAttendance() {
         a = b = selectedSession.radius || 30;
       }
 
+      // Convert from ellipse to a circular "optimal radius" that covers the room
+      let optimalRadius = Math.max(a, b);
+
       // Enforce a minimum physical boundary (35m radius) for real-world indoor GPS
       // Hardware limitation: concrete walls cause 20-30m GPS multipath drift
-      a = Math.max(a, 35);
-      b = Math.max(b, 35);
+      optimalRadius = Math.max(optimalRadius, 35);
 
-      // Expand ellipse slightly when GPS accuracy is poor
+      // Expand radius slightly when GPS accuracy is poor
       const acc = gpsAccuracy || 0;
       const buffer = acc > 20 ? Math.min((acc - 20) * 0.5, 15) : 0;
-      a += buffer;
-      b += buffer;
-
-      // Convert student position to metres offset from classroom centre
-      const cosLat = Math.cos(centerLat * Math.PI / 180);
-      const dx = (longitude - centerLon) * 111320 * cosLat;
-      const dy = (latitude  - centerLat) * 111320;
-
-      const isInside = (dx / a) ** 2 + (dy / b) ** 2 <= 1;
+      const finalRadius = optimalRadius + buffer;
 
       // Keep distance reading for the UI display
       const dist = getDistance(latitude, longitude, centerLat, centerLon);
-      const totalAllowed = Math.round(Math.max(a, b));
+      const isInside = dist <= finalRadius;
+      const totalAllowed = Math.round(finalRadius);
 
       return { isInside, dist, totalAllowed };
     };
