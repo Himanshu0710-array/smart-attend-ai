@@ -1204,8 +1204,12 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
           centerLat = (session.lat_min + session.lat_max) / 2;
           centerLon = (session.lon_min + session.lon_max) / 2;
           const cosLat = Math.cos(centerLat * Math.PI / 180);
-          a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat + 5; // +5 m server tolerance
-          b = (session.lat_max - session.lat_min) / 2 * 111320           + 5;
+          a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat;
+          b = (session.lat_max - session.lat_min) / 2 * 111320;
+          
+          // Enforce minimum boundary + 5m server tolerance
+          a = Math.max(a, 15) + 5;
+          b = Math.max(b, 15) + 5;
         } else {
           // Legacy session: circle fallback
           centerLat = session.lat;
