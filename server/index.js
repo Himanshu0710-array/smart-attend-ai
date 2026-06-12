@@ -1101,16 +1101,21 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
 
 app.delete('/api/sessions/:sessionId', requireAuth, async (req, res) => {
   try {
-    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Only teachers can end sessions' });
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Only teachers can end sessions' });
     const { sessionId } = req.params;
     const session = await Session.findOne({ id: sessionId });
     if (!session) return res.status(404).json({ error: 'Session not found' });
+    
+    const teacherUser = await User.findOne({ uid: req.user.uid });
+    if (session.teacher !== teacherUser?.name && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only end your own sessions' });
+    }
 
     // Calculate session duration in minutes
     const sessionStart = new Date(session.startTime);
     const sessionEnd = new Date();
     const durationMinutes = (sessionEnd - sessionStart) / 60000;
-    const REVERIFY_INTERVAL = 20; // minutes
+    const REVERIFY_INTERVAL = session.reverifyInterval || 20; // minutes
     const expectedChecks = Math.max(1, Math.floor(durationMinutes / REVERIFY_INTERVAL));
 
     // Evaluate final attendance for all students in this session
@@ -1119,12 +1124,9 @@ app.delete('/api/sessions/:sessionId', requireAuth, async (req, res) => {
       if (record.status === 'Absent') continue; // Stay absent
       if (record.status === 'Left Early') continue; // Already penalized
 
-      // Check if student completed enough reverifications
-      const actualChecks = record.reverifications || 0;
-      if (expectedChecks > 1 && actualChecks < Math.ceil(expectedChecks * 0.5)) {
-        record.status = 'Partial';
-        await record.save();
-      }
+      // Removed the strict penalty check that caused "Partial" attendance.
+      // We now give students the Benefit of the Doubt: if they marked "Present", 
+      // they stay "Present" unless their phone actively reported they "Left Early".
     }
 
     // End the session
@@ -1190,17 +1192,31 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
       const session = await Session.findOne({ id: sessionId });
       if (!student || !session) return res.status(404).json({ error: 'Student or Session not found' });
 
-      // Server-side location validation
-      let centerLat = session.lat;
-      let centerLon = session.lon;
-      if (session.lat_min != null) {
-        centerLat = (session.lat_min + session.lat_max) / 2;
-        centerLon = (session.lon_min + session.lon_max) / 2;
-      }
+      // ── Server-side ellipse check ──────────────────────────────────────
+      // Mirrors the client formula exactly so there is no accept/reject mismatch.
+      //   a = east-west half-width  (semi-major axis, metres)
+      //   b = north-south half-height (semi-minor axis, metres)
+      //   inside if: (dx/a)² + (dy/b)² ≤ 1   (+5 m tolerance)
       if (lat != null && lon != null) {
-        const serverDist = getDistance(lat, lon, centerLat, centerLon);
-        const allowed = (session.radius || 30) + 15; // 15m server-side tolerance
-        if (serverDist > allowed) {
+        let centerLat, centerLon, a, b;
+        if (session.lat_min != null && session.lat_max != null &&
+            session.lon_min != null && session.lon_max != null) {
+          centerLat = (session.lat_min + session.lat_max) / 2;
+          centerLon = (session.lon_min + session.lon_max) / 2;
+          const cosLat = Math.cos(centerLat * Math.PI / 180);
+          a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat + 5; // +5 m server tolerance
+          b = (session.lat_max - session.lat_min) / 2 * 111320           + 5;
+        } else {
+          // Legacy session: circle fallback
+          centerLat = session.lat;
+          centerLon = session.lon;
+          a = b = (session.radius || 30) + 15;
+        }
+        const cosLat = Math.cos(centerLat * Math.PI / 180);
+        const dx = (lon - centerLon) * 111320 * cosLat;
+        const dy = (lat - centerLat) * 111320;
+        const insideEllipse = (dx / a) ** 2 + (dy / b) ** 2 <= 1;
+        if (!insideEllipse) {
           return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
         }
       }
@@ -1269,6 +1285,14 @@ app.post('/api/attendance/override', requireAuth, async (req, res) => {
     const allowedStatuses = ['Present', 'Absent', 'Late Entry', 'Left Early', 'Partial'];
     if (!allowedStatuses.includes(newStatus)) {
       return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const session = await Session.findOne({ id: sessionId });
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    
+    const teacherUser = await User.findOne({ uid: req.user.uid });
+    if (session.teacher !== teacherUser?.name && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only override attendance for your own sessions' });
     }
 
     const record = await Attendance.findOneAndUpdate(

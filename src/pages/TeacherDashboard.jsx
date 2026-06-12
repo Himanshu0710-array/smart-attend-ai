@@ -9,6 +9,91 @@ import {
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+// ─── Classroom Ellipse Preview ─────────────────────────────────────────────
+// Renders an SVG showing the classroom rectangle + inscribed ellipse geofence
+// zone, mirroring the bounding-box → ellipse logic used for attendance checks.
+function ClassroomEllipsePreview({ classroom }) {
+  if (!classroom || classroom.lat_min == null) return null;
+
+  // Semi-axes in metres (same formula as the attendance check)
+  const cosLat = Math.cos(((classroom.lat_min + classroom.lat_max) / 2) * Math.PI / 180);
+  const a = Math.round((classroom.lon_max - classroom.lon_min) / 2 * 111320 * cosLat); // EW
+  const b = Math.round((classroom.lat_max - classroom.lat_min) / 2 * 111320);           // NS
+
+  // SVG viewport — fixed 340×160, rectangle fills it with padding
+  const PAD = 20;
+  const W = 340, H = 160;
+  const rw = W - PAD * 2; // rect width in SVG units
+  const rh = H - PAD * 2; // rect height in SVG units
+  const cx = W / 2, cy = H / 2;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-blue-200 dark:border-blue-800/60 bg-blue-50/60 dark:bg-blue-900/10 p-4">
+      <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-3 flex items-center gap-1.5">
+        <MapPin className="w-3.5 h-3.5" />
+        Ellipse Geofence Preview — <span className="font-bold">{classroom.name}</span>
+      </p>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        style={{ maxWidth: 400 }}
+        className="mx-auto"
+      >
+        {/* Outer rectangle = classroom boundary */}
+        <rect
+          x={PAD} y={PAD} width={rw} height={rh}
+          rx={3}
+          fill="none"
+          stroke="#94a3b8"
+          strokeWidth={1.5}
+          strokeDasharray="6 3"
+        />
+
+        {/* Inscribed ellipse = geofence zone */}
+        <ellipse
+          cx={cx} cy={cy} rx={rw / 2} ry={rh / 2}
+          fill="rgba(99,102,241,0.08)"
+          stroke="#6366f1"
+          strokeWidth={2}
+        />
+
+        {/* Center dot */}
+        <circle cx={cx} cy={cy} r={3} fill="#6366f1" />
+        <text x={cx + 6} y={cy + 4} fontSize={9} fill="#6366f1" fontFamily="monospace">CENTER</text>
+
+        {/* Corner labels */}
+        {[{x: PAD-4,   y: PAD-4,    label:'C1', ta:'end',   va:'auto'},
+          {x: W-PAD+4, y: PAD-4,    label:'C2', ta:'start', va:'auto'},
+          {x: W-PAD+4, y: H-PAD+12, label:'C3', ta:'start', va:'auto'},
+          {x: PAD-4,   y: H-PAD+12, label:'C4', ta:'end',   va:'auto'}]
+          .map(({x,y,label,ta}) => (
+            <text key={label} x={x} y={y} fontSize={10} fill="#64748b" textAnchor={ta}
+              fontFamily="monospace" fontWeight="600">{label}</text>
+          ))
+        }
+
+        {/* East-West axis annotation */}
+        <line x1={PAD} y1={cy} x2={W-PAD} y2={cy} stroke="#818cf8" strokeWidth={0.8} strokeDasharray="3 2" opacity={0.6}/>
+        <text x={cx} y={cy - rh/2 - 6} fontSize={9} fill="#818cf8" textAnchor="middle" fontFamily="monospace">
+          2a = {a * 2}m
+        </text>
+
+        {/* North-South axis annotation */}
+        <line x1={cx} y1={PAD} x2={cx} y2={H-PAD} stroke="#818cf8" strokeWidth={0.8} strokeDasharray="3 2" opacity={0.6}/>
+        <text x={cx + rw/2 - 6} y={cy + 4} fontSize={9} fill="#818cf8" textAnchor="end" fontFamily="monospace">
+          2b={b*2}m
+        </text>
+      </svg>
+
+      <div className="flex gap-4 mt-3 text-xs text-slate-500 dark:text-slate-400 justify-center">
+        <span>📐 East-West half-axis <strong className="text-indigo-600 dark:text-indigo-400">{a}m</strong></span>
+        <span>📐 North-South half-axis <strong className="text-indigo-600 dark:text-indigo-400">{b}m</strong></span>
+      </div>
+    </div>
+  );
+}
+
 const statusStyles = {
   'Present': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   'Absent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -826,6 +911,13 @@ export default function TeacherDashboard() {
                 </button>
               )}
             </div>
+
+            {/* Ellipse geofence preview — shown when a room is selected and no session is active */}
+            {!activeSession && selectedClassroomId && (() => {
+              const room = classrooms.find(r => r.id === selectedClassroomId);
+              return room ? <ClassroomEllipsePreview classroom={room} /> : null;
+            })()}
+
             {locationError && (
               <p className="mt-3 text-sm text-red-500">{locationError}</p>
             )}
@@ -904,19 +996,28 @@ export default function TeacherDashboard() {
                           </td>
                           <td className="py-3 px-3 text-sm text-slate-500 dark:text-slate-400">{student.distance || '-'}</td>
                           <td className="py-3 px-3">
-                            {(student.status === 'Absent' || student.status === 'Partial' || student.status === 'Left Early') && (
-                              <button
-                                onClick={() => handleOverride(student.studentUid || student.uid, 'Present')}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
-                                title="Manually mark as Present"
-                              >
-                                <UserCheck className="w-3.5 h-3.5" />
-                                Mark Present
-                              </button>
-                            )}
-                            {student.status === 'Present' && (
-                              <span className="text-xs text-slate-400">—</span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {student.status !== 'Present' && (
+                                <button
+                                  onClick={() => handleOverride(student.studentUid || student.uid, 'Present')}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                                  title="Manually mark as Present"
+                                >
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  Present
+                                </button>
+                              )}
+                              {student.status !== 'Absent' && (
+                                <button
+                                  onClick={() => handleOverride(student.studentUid || student.uid, 'Absent')}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                                  title="Manually mark as Absent"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  Absent
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

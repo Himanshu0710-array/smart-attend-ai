@@ -168,67 +168,49 @@ export default function MarkAttendance() {
       return;
     }
 
-    // Ray-casting algorithm for point in polygon
-    const isPointInPolygon = (lat, lon, polygon) => {
-        let isInside = false;
-        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-            const xi = polygon[i].lat, yi = polygon[i].lon;
-            const xj = polygon[j].lat, yj = polygon[j].lon;
-            const intersect = ((yi > lon) !== (yj > lon))
-                && (lat < (xj - xi) * (lon - yi) / (yj - yi) + xi);
-            if (intersect) isInside = !isInside;
-        }
-        return isInside;
-    };
-
-    // Helper to evaluate a coordinate against strict boundaries with a smart indoor buffer
+    // ── Ellipse geofencing ────────────────────────────────────────────────
+    // The classroom bounding box (lat_min/max, lon_min/max) defines a
+    // rectangle. We inscribe an ellipse into it:
+    //   a = east-west half-width  (semi-major axis, in metres)
+    //   b = north-south half-height (semi-minor axis, in metres)
+    // A point is inside if:  (dx/a)² + (dy/b)² <= 1
+    // This is the same formula used on the server → no more mismatch.
     const evaluateLocation = (latitude, longitude, gpsAccuracy) => {
-        let centerLat = selectedSession.lat;
-        let centerLon = selectedSession.lon;
-        let roomRadius = selectedSession.radius || 30;
-        let isInsidePolygon = false;
-        let hasPolygon = false;
+      let centerLat, centerLon, a, b;
 
-        if (selectedSession.c1_lat != null && selectedSession.c2_lat != null && 
-            selectedSession.c3_lat != null && selectedSession.c4_lat != null) {
-            hasPolygon = true;
-            const polygon = [
-                { lat: selectedSession.c1_lat, lon: selectedSession.c1_lon },
-                { lat: selectedSession.c2_lat, lon: selectedSession.c2_lon },
-                { lat: selectedSession.c3_lat, lon: selectedSession.c3_lon },
-                { lat: selectedSession.c4_lat, lon: selectedSession.c4_lon }
-            ];
-            isInsidePolygon = isPointInPolygon(latitude, longitude, polygon);
-        }
+      if (selectedSession.lat_min != null && selectedSession.lat_max != null &&
+          selectedSession.lon_min != null && selectedSession.lon_max != null) {
+        // Compute ellipse from stored bounding box
+        centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
+        centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
+        const cosLat = Math.cos(centerLat * Math.PI / 180);
+        a = (selectedSession.lon_max - selectedSession.lon_min) / 2 * 111320 * cosLat; // EW metres
+        b = (selectedSession.lat_max - selectedSession.lat_min) / 2 * 111320;           // NS metres
+      } else {
+        // Legacy session: fall back to circle
+        centerLat = selectedSession.lat;
+        centerLon = selectedSession.lon;
+        a = b = selectedSession.radius || 30;
+      }
 
-        if (selectedSession.lat_min != null) {
-            centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
-            centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
-            const distMax = Math.max(
-              getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_max),
-              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_min),
-              getDistance(centerLat, centerLon, selectedSession.lat_max, selectedSession.lon_min),
-              getDistance(centerLat, centerLon, selectedSession.lat_min, selectedSession.lon_max)
-            );
-            roomRadius = Math.max(distMax, 1);
-        }
-        
-        const dist = getDistance(latitude, longitude, centerLat, centerLon);
-        
-        const acc = gpsAccuracy || 0;
-        const dynamicBuffer = acc > 20
-          ? Math.min((acc - 20) * 0.3, 5)
-          : 0;
-        const totalAllowed = Math.round(roomRadius + dynamicBuffer);
-        
-        let isInside = false;
-        if (hasPolygon) {
-            isInside = isInsidePolygon;
-        } else {
-            isInside = dist <= totalAllowed;
-        }
-        
-        return { isInside, dist, totalAllowed };
+      // Expand ellipse slightly when GPS accuracy is poor
+      const acc = gpsAccuracy || 0;
+      const buffer = acc > 20 ? Math.min((acc - 20) * 0.3, 5) : 0;
+      a += buffer;
+      b += buffer;
+
+      // Convert student position to metres offset from classroom centre
+      const cosLat = Math.cos(centerLat * Math.PI / 180);
+      const dx = (longitude - centerLon) * 111320 * cosLat;
+      const dy = (latitude  - centerLat) * 111320;
+
+      const isInside = (dx / a) ** 2 + (dy / b) ** 2 <= 1;
+
+      // Keep distance reading for the UI display
+      const dist = getDistance(latitude, longitude, centerLat, centerLon);
+      const totalAllowed = Math.round(Math.max(a, b));
+
+      return { isInside, dist, totalAllowed };
     };
 
     // Use watchPosition for up to 10 seconds to allow GPS to "settle"

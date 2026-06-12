@@ -8,6 +8,85 @@ import {
   Pencil, Trash2, GraduationCap, Building2, FileSpreadsheet, LocateFixed, Save, X, Shield, ShieldCheck, FileText, XCircle, Loader2, Calendar as CalendarIcon, CheckCircle, Clock, AlertTriangle, AlertCircle
 } from 'lucide-react';
 
+// ─── Classroom live ellipse preview helper ──────────────────────────────────
+// Returns null when not enough corners are filled in yet.
+function ClassroomLivePreview({ data }) {
+  const lats = ['c1_lat','c2_lat','c3_lat','c4_lat'].map(k => parseFloat(data[k])).filter(v => !isNaN(v));
+  const lons = ['c1_lon','c2_lon','c3_lon','c4_lon'].map(k => parseFloat(data[k])).filter(v => !isNaN(v));
+  if (lats.length < 2 || lons.length < 2) return null;
+
+  const latMin = Math.min(...lats), latMax = Math.max(...lats);
+  const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
+  const centerLat = (latMin + latMax) / 2;
+  const cosLat = Math.cos(centerLat * Math.PI / 180);
+
+  // Semi-axes in metres (matches the attendance check formula exactly)
+  const a = Math.round((lonMax - lonMin) / 2 * 111320 * cosLat); // EW
+  const b = Math.round((latMax - latMin) / 2 * 111320);           // NS
+  const width  = a * 2;   // full east-west span
+  const height = b * 2;   // full north-south span
+
+  // SVG layout
+  const PAD = 28, W = 360, H = 180;
+  const rw = W - PAD * 2, rh = H - PAD * 2;
+  const cx = W / 2, cy = H / 2;
+
+  return (
+    <div className="mt-5 rounded-2xl border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-900/10 p-4">
+      <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-3 flex items-center gap-1.5">
+        <MapPin className="w-3.5 h-3.5" /> Live Geofence Preview
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth: 420}} className="mx-auto block">
+        {/* Rectangle — classroom boundary */}
+        <rect x={PAD} y={PAD} width={rw} height={rh} rx={4}
+          fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="6 3" />
+
+        {/* Inscribed ellipse — geofence zone */}
+        <ellipse cx={cx} cy={cy} rx={rw/2} ry={rh/2}
+          fill="rgba(99,102,241,0.09)" stroke="#6366f1" strokeWidth={2} />
+
+        {/* Center dot */}
+        <circle cx={cx} cy={cy} r={3} fill="#6366f1" />
+        <text x={cx+6} y={cy+4} fontSize={9} fill="#6366f1" fontFamily="monospace">CENTER</text>
+
+        {/* Corner labels */}
+        {[
+          {x: PAD-4,   y: PAD-6,    label:'C1', ta:'end'},
+          {x: W-PAD+4, y: PAD-6,    label:'C2', ta:'start'},
+          {x: W-PAD+4, y: H-PAD+14, label:'C3', ta:'start'},
+          {x: PAD-4,   y: H-PAD+14, label:'C4', ta:'end'},
+        ].map(({x,y,label,ta}) => (
+          <text key={label} x={x} y={y} fontSize={10} fill="#64748b"
+            textAnchor={ta} fontFamily="monospace" fontWeight="700">{label}</text>
+        ))}
+
+        {/* Width annotation (top) */}
+        <line x1={PAD} y1={PAD-14} x2={W-PAD} y2={PAD-14} stroke="#818cf8" strokeWidth={1} markerEnd="url(#arr)" markerStart="url(#arr)" />
+        <text x={cx} y={PAD-16} fontSize={10} fill="#818cf8" textAnchor="middle" fontFamily="monospace" fontWeight="600">
+          Width: {width}m
+        </text>
+
+        {/* Height annotation (right) */}
+        <line x1={W-PAD+14} y1={PAD} x2={W-PAD+14} y2={H-PAD} stroke="#818cf8" strokeWidth={1} />
+        <text x={W-PAD+18} y={cy+4} fontSize={10} fill="#818cf8" textAnchor="start" fontFamily="monospace" fontWeight="600">
+          {height}m
+        </text>
+
+        {/* EW ellipse axis line */}
+        <line x1={PAD} y1={cy} x2={W-PAD} y2={cy} stroke="#818cf8" strokeWidth={0.7} strokeDasharray="3 2" opacity={0.5} />
+        {/* NS ellipse axis line */}
+        <line x1={cx} y1={PAD} x2={cx} y2={H-PAD} stroke="#818cf8" strokeWidth={0.7} strokeDasharray="3 2" opacity={0.5} />
+      </svg>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-xs text-slate-500 dark:text-slate-400 justify-center">
+        <span>📐 Width (EW): <strong className="text-indigo-600 dark:text-indigo-400">{width}m</strong></span>
+        <span>📐 Height (NS): <strong className="text-indigo-600 dark:text-indigo-400">{height}m</strong></span>
+        <span>🎯 Ellipse semi-axes: <strong className="text-indigo-600 dark:text-indigo-400">{a}m × {b}m</strong></span>
+      </div>
+    </div>
+  );
+}
+
+
 const statusStyles = {
   'Present': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   'Absent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
@@ -894,6 +973,9 @@ export default function AdminDashboard() {
                 </div>
               ))}
 
+              {/* Live preview — updates as coordinates are entered */}
+              <ClassroomLivePreview data={newClassroom} />
+
               <div className="flex justify-end gap-2 mt-6">
                 <button type="button" onClick={() => setShowClassroomModal(false)} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white text-sm">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Create</button>
@@ -946,6 +1028,9 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               ))}
+
+              {/* Live preview — updates as coordinates are edited */}
+              <ClassroomLivePreview data={editingClassroom} />
 
               <div className="flex justify-end gap-2 mt-6">
                 <button type="button" onClick={() => { setShowEditClassroomModal(false); setEditingClassroom(null); }} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 rounded-lg dark:text-white text-sm">Cancel</button>
