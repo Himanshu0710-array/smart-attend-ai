@@ -23,45 +23,74 @@ function ClassroomLivePreview({ data }) {
   const width  = Math.round((lonMax - lonMin) * 111320 * cosLat); // EW span in metres
   const height = Math.round((latMax - latMin) * 111320);          // NS span in metres
 
-  // SVG layout
-  const PAD = 28, W = 360, H = 180;
-  const rw = W - PAD * 2, rh = H - PAD * 2;
-  const cx = W / 2, cy = H / 2;
+  // SVG canvas
+  const W = 400, H = 240;
+  const PAD_TOP = 36, PAD_BOTTOM = 20, PAD_LEFT = 28, PAD_RIGHT = 60;
+
+  // Available drawing area
+  const drawW = W - PAD_LEFT - PAD_RIGHT;
+  const drawH = H - PAD_TOP - PAD_BOTTOM;
+
+  // Scale the rectangle to fit while preserving the real aspect ratio
+  const roomAspect = width > 0 && height > 0 ? width / height : 1;
+  const canvasAspect = drawW / drawH;
+  let rw, rh;
+  if (roomAspect >= canvasAspect) {
+    rw = drawW;
+    rh = Math.round(drawW / roomAspect);
+  } else {
+    rh = drawH;
+    rw = Math.round(drawH * roomAspect);
+  }
+
+  // Centre the room rectangle in the drawing area
+  const rx = PAD_LEFT + (drawW - rw) / 2;
+  const ry = PAD_TOP  + (drawH - rh) / 2;
+  const cx = rx + rw / 2;
+  const cy = ry + rh / 2;
 
   return (
     <div className="mt-5 rounded-2xl border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/50 dark:bg-indigo-900/10 p-4">
       <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-3 flex items-center gap-1.5">
         <MapPin className="w-3.5 h-3.5" /> Live Geofence Preview
       </p>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth: 420}} className="mx-auto block">
-        {/* Rectangle — classroom boundary */}
-        <rect x={PAD} y={PAD} width={rw} height={rh} rx={4}
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth: 440}} className="mx-auto block">
+
+        {/* Room rectangle — proportional to real dimensions */}
+        <rect x={rx} y={ry} width={rw} height={rh} rx={4}
           fill="rgba(99,102,241,0.09)" stroke="#6366f1" strokeWidth={2} />
 
         {/* Center dot */}
         <circle cx={cx} cy={cy} r={3} fill="#6366f1" />
         <text x={cx+6} y={cy+4} fontSize={9} fill="#6366f1" fontFamily="monospace">CENTER</text>
 
-        {/* Corner labels */}
+        {/* Corner dots & labels */}
         {[
-          {x: PAD-4,   y: PAD-6,    label:'C1', ta:'end'},
-          {x: W-PAD+4, y: PAD-6,    label:'C2', ta:'start'},
-          {x: W-PAD+4, y: H-PAD+14, label:'C3', ta:'start'},
-          {x: PAD-4,   y: H-PAD+14, label:'C4', ta:'end'},
-        ].map(({x,y,label,ta}) => (
-          <text key={label} x={x} y={y} fontSize={10} fill="#64748b"
-            textAnchor={ta} fontFamily="monospace" fontWeight="700">{label}</text>
+          {x: rx,      y: ry,      label:'C1', ta:'end',   dx:-6, dy:-6},
+          {x: rx+rw,   y: ry,      label:'C2', ta:'start', dx: 6, dy:-6},
+          {x: rx+rw,   y: ry+rh,   label:'C3', ta:'start', dx: 6, dy:14},
+          {x: rx,      y: ry+rh,   label:'C4', ta:'end',   dx:-6, dy:14},
+        ].map(({x,y,label,ta,dx,dy}) => (
+          <g key={label}>
+            <circle cx={x} cy={y} r={2.5} fill="#94a3b8" />
+            <text x={x+dx} y={y+dy} fontSize={10} fill="#64748b"
+              textAnchor={ta} fontFamily="monospace" fontWeight="700">{label}</text>
+          </g>
         ))}
 
-        {/* Width annotation (top) */}
-        <line x1={PAD} y1={PAD-14} x2={W-PAD} y2={PAD-14} stroke="#818cf8" strokeWidth={1} markerEnd="url(#arr)" markerStart="url(#arr)" />
-        <text x={cx} y={PAD-16} fontSize={10} fill="#818cf8" textAnchor="middle" fontFamily="monospace" fontWeight="600">
-          Width: {width}m
+        {/* Width annotation — above the room */}
+        <line x1={rx} y1={ry-10} x2={rx+rw} y2={ry-10} stroke="#818cf8" strokeWidth={1} />
+        <line x1={rx}    y1={ry-14} x2={rx}    y2={ry-6} stroke="#818cf8" strokeWidth={1} />
+        <line x1={rx+rw} y1={ry-14} x2={rx+rw} y2={ry-6} stroke="#818cf8" strokeWidth={1} />
+        <text x={cx} y={ry-14} fontSize={10} fill="#818cf8" textAnchor="middle" fontFamily="monospace" fontWeight="600">
+          {width}m
         </text>
 
-        {/* Height annotation (right) */}
-        <line x1={W-PAD+14} y1={PAD} x2={W-PAD+14} y2={H-PAD} stroke="#818cf8" strokeWidth={1} />
-        <text x={W-PAD+18} y={cy+4} fontSize={10} fill="#818cf8" textAnchor="start" fontFamily="monospace" fontWeight="600">
+        {/* Height annotation — right of the room */}
+        <line x1={rx+rw+10} y1={ry} x2={rx+rw+10} y2={ry+rh} stroke="#818cf8" strokeWidth={1} />
+        <line x1={rx+rw+6} y1={ry}    x2={rx+rw+14} y2={ry}    stroke="#818cf8" strokeWidth={1} />
+        <line x1={rx+rw+6} y1={ry+rh} x2={rx+rw+14} y2={ry+rh} stroke="#818cf8" strokeWidth={1} />
+        <text x={rx+rw+18} y={cy+4} fontSize={10} fill="#818cf8" textAnchor="start" fontFamily="monospace" fontWeight="600">
           {height}m
         </text>
       </svg>
@@ -72,6 +101,7 @@ function ClassroomLivePreview({ data }) {
     </div>
   );
 }
+
 
 
 const statusStyles = {
