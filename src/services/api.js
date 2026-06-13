@@ -78,8 +78,8 @@ export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { met
 // Attendance
 export const getAttendance = (sessionId) => request(`/attendance/${sessionId}`);
 export const getSessionRecords = (sessionId) => request(`/attendance/${sessionId}`);
-export const markAttendance = (sessionId, studentUid, lat, lon, distance, isLate, deviceFingerprint) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, lat, lon, distance, isLate, deviceFingerprint }) });
-export const reverifyAttendance = (sessionId, studentUid, isInsideGeofence, distance) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, isInsideGeofence, distance }) });
+export const markAttendance = (sessionId, studentUid, avgLat, avgLon, accuracy, samplesUsed, isLate, deviceFingerprint) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, avgLat, avgLon, accuracy, samplesUsed, isLate, deviceFingerprint }) });
+export const reverifyAttendance = (sessionId, studentUid, avgLat, avgLon) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, avgLat, avgLon }) });
 export const overrideAttendance = (sessionId, studentUid, newStatus) => request('/attendance/override', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, newStatus }) });
 
 // History & Reports

@@ -8,7 +8,7 @@ import {
   Pencil, Trash2, GraduationCap, Building2, FileSpreadsheet, LocateFixed, Save, X, Shield, ShieldCheck, FileText, XCircle, Loader2, Calendar as CalendarIcon, CheckCircle, Clock, AlertTriangle, AlertCircle
 } from 'lucide-react';
 
-// ─── Classroom live ellipse preview helper ──────────────────────────────────
+// ─── Classroom live preview helper ──────────────────────────────────────────────
 // Returns null when not enough corners are filled in yet.
 function ClassroomLivePreview({ data }) {
   const lats = ['c1_lat','c2_lat','c3_lat','c4_lat'].map(k => parseFloat(data[k])).filter(v => !isNaN(v));
@@ -20,11 +20,8 @@ function ClassroomLivePreview({ data }) {
   const centerLat = (latMin + latMax) / 2;
   const cosLat = Math.cos(centerLat * Math.PI / 180);
 
-  // Semi-axes in metres (matches the attendance check formula exactly)
-  const a = Math.round((lonMax - lonMin) / 2 * 111320 * cosLat); // EW
-  const b = Math.round((latMax - latMin) / 2 * 111320);           // NS
-  const width  = a * 2;   // full east-west span
-  const height = b * 2;   // full north-south span
+  const width  = Math.round((lonMax - lonMin) * 111320 * cosLat); // EW span in metres
+  const height = Math.round((latMax - latMin) * 111320);          // NS span in metres
 
   // SVG layout
   const PAD = 28, W = 360, H = 180;
@@ -39,10 +36,6 @@ function ClassroomLivePreview({ data }) {
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth: 420}} className="mx-auto block">
         {/* Rectangle — classroom boundary */}
         <rect x={PAD} y={PAD} width={rw} height={rh} rx={4}
-          fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="6 3" />
-
-        {/* Inscribed ellipse — geofence zone */}
-        <ellipse cx={cx} cy={cy} rx={rw/2} ry={rh/2}
           fill="rgba(99,102,241,0.09)" stroke="#6366f1" strokeWidth={2} />
 
         {/* Center dot */}
@@ -71,16 +64,10 @@ function ClassroomLivePreview({ data }) {
         <text x={W-PAD+18} y={cy+4} fontSize={10} fill="#818cf8" textAnchor="start" fontFamily="monospace" fontWeight="600">
           {height}m
         </text>
-
-        {/* EW ellipse axis line */}
-        <line x1={PAD} y1={cy} x2={W-PAD} y2={cy} stroke="#818cf8" strokeWidth={0.7} strokeDasharray="3 2" opacity={0.5} />
-        {/* NS ellipse axis line */}
-        <line x1={cx} y1={PAD} x2={cx} y2={H-PAD} stroke="#818cf8" strokeWidth={0.7} strokeDasharray="3 2" opacity={0.5} />
       </svg>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-xs text-slate-500 dark:text-slate-400 justify-center">
         <span>📐 Width (EW): <strong className="text-indigo-600 dark:text-indigo-400">{width}m</strong></span>
         <span>📐 Height (NS): <strong className="text-indigo-600 dark:text-indigo-400">{height}m</strong></span>
-        <span>🎯 Ellipse semi-axes: <strong className="text-indigo-600 dark:text-indigo-400">{a}m × {b}m</strong></span>
       </div>
     </div>
   );

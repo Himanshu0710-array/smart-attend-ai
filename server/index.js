@@ -23,6 +23,24 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function isInsidePolygon(lat, lon, polyData) {
+  if (!polyData || polyData.c1_lat == null) return false;
+  const polygon = [
+    { lat: polyData.c1_lat, lon: polyData.c1_lon },
+    { lat: polyData.c2_lat, lon: polyData.c2_lon },
+    { lat: polyData.c3_lat, lon: polyData.c3_lon },
+    { lat: polyData.c4_lat, lon: polyData.c4_lon }
+  ];
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lat, yi = polygon[i].lon;
+    const xj = polygon[j].lat, yj = polygon[j].lon;
+    const intersect = ((yi > lon) !== (yj > lon)) && (lat < (xj - xi) * (lon - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 dotenv.config();
 
 const app = express();
@@ -1157,7 +1175,7 @@ app.get('/api/attendance/:sessionId', requireAuth, async (req, res) => {
 app.post('/api/attendance/mark', requireAuth, async (req, res) => {
   try {
     if (req.user.role !== 'student') return res.status(403).json({ error: 'Only students can mark attendance' });
-    const { sessionId, studentUid, lat, lon, distance, isLate, deviceFingerprint } = req.body;
+    const { sessionId, studentUid, avgLat, avgLon, accuracy, samplesUsed, isLate, deviceFingerprint } = req.body;
     
     // Extra security check to prevent students from marking other students
     if (req.user.uid !== studentUid) return res.status(403).json({ error: 'Cannot mark attendance for another student' });
@@ -1192,38 +1210,13 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
       const session = await Session.findOne({ id: sessionId });
       if (!student || !session) return res.status(404).json({ error: 'Student or Session not found' });
 
-      // ── Server-side circular distance check ──────────────────────────────
-      // Mirrors the client formula exactly so there is no accept/reject mismatch.
-      if (lat != null && lon != null) {
-          let centerLat, centerLon, optimalRadius;
-          if (session.lat_min != null && session.lat_max != null &&
-              session.lon_min != null && session.lon_max != null) {
-            centerLat = (session.lat_min + session.lat_max) / 2;
-            centerLon = (session.lon_min + session.lon_max) / 2;
-            const cosLat = Math.cos(centerLat * Math.PI / 180);
-            const a = (session.lon_max - session.lon_min) / 2 * 111320 * cosLat;
-            const b = (session.lat_max - session.lat_min) / 2 * 111320;
-            
-            optimalRadius = Math.max(a, b);
-            // Enforce minimum boundary (35m) + 5m server tolerance
-            optimalRadius = Math.max(optimalRadius, 35) + 5;
-          } else {
-            // Legacy session: circle fallback
-            centerLat = session.lat;
-            centerLon = session.lon;
-            optimalRadius = (session.radius || 30) + 15;
-          }
-          
-          const cosLat = Math.cos(centerLat * Math.PI / 180);
-          const dx = (lon - centerLon) * 111320 * cosLat;
-          const dy = (lat - centerLat) * 111320;
-          const dist = Math.sqrt(dx*dx + dy*dy);
-          
-          const insideCircle = dist <= optimalRadius;
-          if (!insideCircle) {
-            return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
-          }
+      // ── Server-side polygon check ──────────────────────────────
+      if (avgLat != null && avgLon != null) {
+        const insidePolygon = isInsidePolygon(avgLat, avgLon, session);
+        if (!insidePolygon) {
+          return res.status(403).json({ error: 'Location verification failed. You must be inside the classroom to mark attendance.' });
         }
+      }
 
       record = new Attendance({
         sessionId,
@@ -1238,7 +1231,7 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
 
     record.status = isLate ? 'Late Entry' : 'Present';
     record.markedAt = new Date().toISOString();
-    record.distance = `${Math.round(distance)}m`;
+    record.distance = accuracy != null ? `Acc: ±${Math.round(accuracy)}m` : 'Inside Polygon';
     record.reverifications = (record.reverifications || 0) + 1;
     record.missedReverifications = 0;
     await record.save();
@@ -1252,21 +1245,24 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
 
 app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
   try {
-    const { sessionId, studentUid, isInsideGeofence, distance } = req.body;
+    const { sessionId, studentUid, avgLat, avgLon } = req.body;
     if (req.user.uid !== studentUid) return res.status(403).json({ error: 'Unauthorized' });
 
     const record = await Attendance.findOne({ sessionId, studentUid });
     if (!record) return res.status(404).json({ error: 'Record not found' });
 
+    const session = await Session.findOne({ id: sessionId });
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    const isInsideGeofence = avgLat != null && avgLon != null && isInsidePolygon(avgLat, avgLon, session);
+
     if (isInsideGeofence) {
-      record.distance = `${Math.round(distance)}m`;
       record.reverifications = (record.reverifications || 0) + 1;
       record.missedReverifications = 0;
       if (record.status === 'Left Early') {
         record.status = 'Present';
       }
     } else {
-      record.distance = `${Math.round(distance)}m`;
       record.missedReverifications = (record.missedReverifications || 0) + 1;
       if (record.missedReverifications >= 2) {
         record.status = 'Left Early';

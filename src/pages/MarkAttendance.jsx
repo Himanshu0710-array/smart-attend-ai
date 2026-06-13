@@ -3,20 +3,6 @@ import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
 import { MapPin, CheckCircle, XCircle, Loader2, Wifi, RefreshCw, ShieldCheck, CalendarDays } from 'lucide-react';
 
-// Haversine formula
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const toRad = (deg) => (parseFloat(deg) * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
 // Ray-casting algorithm removed due to unreliability with bowtie polygons
 
 // Audio fingerprint — differs even between two identical phones due to
@@ -104,6 +90,13 @@ export default function MarkAttendance() {
   const [lastChecked, setLastChecked] = useState(null);
   const [nextReverify, setNextReverify] = useState(null);
   const [myStatus, setMyStatus] = useState(null);
+  const [progressMsg, setProgressMsg] = useState('');
+
+  const MIN_SAMPLES = 5;
+  const MAX_SAMPLES = 15;
+  const ACCURACY_TARGET = 30;
+  const ACCURACY_CUTOFF = 80;
+  const DELAY_MS = 2000;
 
   // Fetch live sessions
   useEffect(() => {
@@ -146,8 +139,9 @@ export default function MarkAttendance() {
     setLoading(true);
     setLocationError('');
     setDeviceError('');
+    setProgressMsg('Initializing GPS...');
 
-    // Proactively check device fingerprint first (now async — includes audio signal)
+    // Proactively check device fingerprint first
     try {
       const fp = await getDeviceFingerprint();
       const res = await api.verifyDeviceFingerprint(fp, studentUid);
@@ -155,7 +149,7 @@ export default function MarkAttendance() {
         setDeviceError(res.message);
         setCheckResult('device_error');
         setLoading(false);
-        return; // Abort attendance flow
+        return; 
       }
     } catch (e) {
       console.warn('Could not verify device fingerprint', e);
@@ -168,135 +162,74 @@ export default function MarkAttendance() {
       return;
     }
 
-    // ── Ellipse geofencing ────────────────────────────────────────────────
-    // The classroom bounding box (lat_min/max, lon_min/max) defines a
-    // rectangle. We inscribe an ellipse into it:
-    //   a = east-west half-width  (semi-major axis, in metres)
-    //   b = north-south half-height (semi-minor axis, in metres)
-    // A point is inside if:  (dx/a)² + (dy/b)² <= 1
-    // This is the same formula used on the server → no more mismatch.
-    const evaluateLocation = (latitude, longitude, gpsAccuracy) => {
-      let centerLat, centerLon, a, b;
+    // Adaptive multi-sampling loop
+    let samples = [];
+    const getPos = () => new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+    });
 
-      if (selectedSession.lat_min != null && selectedSession.lat_max != null &&
-          selectedSession.lon_min != null && selectedSession.lon_max != null) {
-        // Compute ellipse from stored bounding box
-        centerLat = (selectedSession.lat_min + selectedSession.lat_max) / 2;
-        centerLon = (selectedSession.lon_min + selectedSession.lon_max) / 2;
-        const cosLat = Math.cos(centerLat * Math.PI / 180);
-        a = (selectedSession.lon_max - selectedSession.lon_min) / 2 * 111320 * cosLat; // EW metres
-        b = (selectedSession.lat_max - selectedSession.lat_min) / 2 * 111320;           // NS metres
-      } else {
-        // Legacy session: fall back to circle
-        centerLat = selectedSession.lat;
-        centerLon = selectedSession.lon;
-        a = b = selectedSession.radius || 30;
-      }
-
-      // Convert from ellipse to a circular "optimal radius" that covers the room
-      let optimalRadius = Math.max(a, b);
-
-      // Enforce a minimum physical boundary (35m radius) for real-world indoor GPS
-      // Hardware limitation: concrete walls cause 20-30m GPS multipath drift
-      optimalRadius = Math.max(optimalRadius, 35);
-
-      // Expand radius slightly when GPS accuracy is poor
-      const acc = gpsAccuracy || 0;
-      const buffer = acc > 20 ? Math.min((acc - 20) * 0.5, 15) : 0;
-      const finalRadius = optimalRadius + buffer;
-
-      // Keep distance reading for the UI display
-      const dist = getDistance(latitude, longitude, centerLat, centerLon);
-      const isInside = dist <= finalRadius;
-      const totalAllowed = Math.round(finalRadius);
-
-      return { isInside, dist, totalAllowed };
-    };
-
-    // Use watchPosition for up to 10 seconds to allow GPS to "settle"
-    let watchId;
-    let bestPosition = null;
-    let bestEval = null;
-    
-    const finishCheck = async (pos, evalResult) => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
-      
-      const { latitude, longitude, accuracy } = pos.coords;
-      const { isInside, dist, totalAllowed } = evalResult;
-
-      setLocation({ latitude, longitude, accuracy });
-      setLastChecked(new Date());
-      setDistance(dist !== null ? Math.round(dist) : null);
-      setAllowedDistance(totalAllowed);
-
+    for (let i = 1; i <= MAX_SAMPLES; i++) {
       try {
-        if (isInside) {
-          if (myStatus === 'Absent' || !myStatus) {
-            const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
-            const fp = await getDeviceFingerprint();
-            await api.markAttendance(selectedSession.id, studentUid, latitude, longitude, dist ?? 0, elapsed > 10, fp);
-          } else {
-            await api.reverifyAttendance(selectedSession.id, studentUid, true, dist ?? 0);
-          }
-        } else {
-          if (myStatus && myStatus !== 'Absent') {
-            await api.reverifyAttendance(selectedSession.id, studentUid, false, dist ?? 0);
-          }
+        const pos = await getPos();
+        samples.push(pos.coords);
+        const bestAcc = Math.min(...samples.map(s => s.accuracy));
+        setProgressMsg(`Getting location... sample ${i}/${MAX_SAMPLES} (current accuracy: ±${Math.round(pos.coords.accuracy)}m)`);
+        
+        if (i >= MIN_SAMPLES && bestAcc <= ACCURACY_TARGET) {
+          break; // Stop early if achieved target after min samples
         }
-        const records = await api.getSessionRecords(selectedSession.id);
-        setMyStatus(records[studentUid]?.status || 'Absent');
-        setCheckResult(isInside ? 'inside' : 'outside');
-      } catch (e) {
+      } catch (err) {
+        setProgressMsg(`Getting location... sample ${i}/${MAX_SAMPLES} (failed to read)`);
+      }
+      
+      // Delay before next sample
+      if (i < MAX_SAMPLES) {
+        await new Promise(res => setTimeout(res, DELAY_MS));
+      }
+    }
+
+    if (samples.length === 0) {
+      setLocationError('Unable to get your location. Please check permissions and try again.');
+      setLoading(false);
+      return;
+    }
+
+    const bestAccuracy = Math.min(...samples.map(s => s.accuracy));
+    if (bestAccuracy > ACCURACY_CUTOFF) {
+      setLocationError(`GPS accuracy is too low (±${Math.round(bestAccuracy)}m). Please move near a window or go outside and try again.`);
+      setLoading(false);
+      return;
+    }
+
+    const avgLat = samples.reduce((sum, s) => sum + s.latitude, 0) / samples.length;
+    const avgLon = samples.reduce((sum, s) => sum + s.longitude, 0) / samples.length;
+    
+    setLocation({ latitude: avgLat, longitude: avgLon, accuracy: bestAccuracy });
+    setLastChecked(new Date());
+    setDistance(null);
+    setAllowedDistance(null);
+
+    try {
+      if (myStatus === 'Absent' || !myStatus) {
+        const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
+        const fp = await getDeviceFingerprint();
+        await api.markAttendance(selectedSession.id, studentUid, avgLat, avgLon, bestAccuracy, samples.length, elapsed > 10, fp);
+      } else {
+        await api.reverifyAttendance(selectedSession.id, studentUid, avgLat, avgLon);
+      }
+      const records = await api.getSessionRecords(selectedSession.id);
+      setMyStatus(records[studentUid]?.status || 'Absent');
+      setCheckResult('inside');
+    } catch (e) {
+      if (e.error && (e.error.includes('outside') || e.error.includes('Location verification failed'))) {
+        setCheckResult('outside');
+      } else {
         console.error('Failed to update attendance:', e);
         setDeviceError(e.error || 'Failed to communicate with server.');
         setCheckResult('device_error');
       }
-      setLoading(false);
-    };
-
-    const timeoutId = setTimeout(() => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
-      if (bestPosition && bestEval) {
-        finishCheck(bestPosition, bestEval);
-      } else {
-        setLocationError('Location request timed out. Please ensure GPS is enabled and try again.');
-        setLoading(false);
-      }
-    }, 10000); // Wait up to 10 seconds for GPS to settle
-
-    watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        const evalResult = evaluateLocation(latitude, longitude, accuracy);
-        
-        // Always prefer the position with the lowest accuracy value (best GPS fix)
-        if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
-          bestPosition = position;
-          bestEval = evalResult;
-        }
-
-        // Only early-exit if inside AND accuracy is good
-        if (evalResult.isInside && accuracy <= 20) {
-          clearTimeout(timeoutId);
-          finishCheck(position, evalResult);
-        }
-      },
-      (error) => {
-        // If we already got a fallback position before the error, don't fail immediately
-        if (bestPosition) return; 
-        
-        clearTimeout(timeoutId);
-        if (watchId) navigator.geolocation.clearWatch(watchId);
-        
-        let msg = 'Unable to get your location.';
-        if (error.code === 1) msg = 'Location permission denied. Please enable GPS.';
-        else if (error.code === 2) msg = 'Position unavailable. Check your GPS signal.';
-        else if (error.code === 3) msg = 'Location request timed out. Try again.';
-        setLocationError(msg);
-        setLoading(false);
-      },
-      { enableHighAccuracy: true, maximumAge: 0 }
-    );
+    }
+    setLoading(false);
   }, [selectedSession, studentUid, myStatus]);
 
   // Reverification timer (every X minutes)
@@ -387,8 +320,8 @@ export default function MarkAttendance() {
       {loading && (
         <div className="text-center py-8 animate-pulse">
           <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-400 font-medium">Acquiring precise GPS lock...</p>
-          <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">Allowing satellite signal to settle (up to 10s)</p>
+          <p className="text-slate-600 dark:text-slate-400 font-medium">{progressMsg || 'Acquiring precise GPS lock...'}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">Allowing satellite signal to settle</p>
         </div>
       )}
 
