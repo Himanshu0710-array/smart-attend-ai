@@ -14,7 +14,7 @@ import { Subject } from './models/Subject.js';
 import { SystemConfig } from './models/SystemConfig.js';
 import { requireAuth, requireAdmin } from './middleware/auth.js';
 
-function getDistance(lat1, lon1, lat2, lon2) {
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
   const toRad = (deg) => (parseFloat(deg) * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -1070,6 +1070,11 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
     const sessionId = `session-${Date.now()}`;
     const displayClassName = `${groupName} — ${subject.trim()}`;
 
+    const BUILDING_RADIUS_METERS = 50;
+    const OTP_EXPIRY_SECONDS = 90;
+
+    const generatedOtp = String(Math.floor(1000 + Math.random() * 9000)); // 4 digit OTP
+
     const newSession = new Session({
       id: sessionId,
       classId,
@@ -1089,7 +1094,14 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
       c1_lat, c1_lon, c2_lat, c2_lon, c3_lat, c3_lon, c4_lat, c4_lon,
       startTime: new Date().toISOString(),
       status: 'active',
-      reverifyInterval: reverifyInterval !== undefined ? reverifyInterval : 20
+      reverifyInterval: reverifyInterval !== undefined ? reverifyInterval : 20,
+      // OTP fields
+      otp: generatedOtp,
+      otpExpiry: new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000),
+      // Building boundary fields (teacher's location = building center)
+      buildingLat: fallbackLat,
+      buildingLon: fallbackLon,
+      buildingRadius: BUILDING_RADIUS_METERS,
     });
     await newSession.save();
 
@@ -1243,6 +1255,151 @@ app.post('/api/attendance/mark', requireAuth, async (req, res) => {
   }
 });
 
+// ========= OTP REGENERATION ROUTE =========
+app.post('/api/sessions/:sessionId/regenerate-otp', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Only teachers can regenerate OTP' });
+
+    const { sessionId } = req.params;
+    const session = await Session.findOne({ id: sessionId });
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    // Verify teacher owns this session
+    const teacherUser = await User.findOne({ uid: req.user.uid });
+    if (session.teacher !== teacherUser?.name) {
+      return res.status(403).json({ error: 'You can only regenerate OTP for your own sessions' });
+    }
+
+    const OTP_EXPIRY_SECONDS = 90;
+    const newOtp = String(Math.floor(1000 + Math.random() * 9000));
+    session.otp = newOtp;
+    session.otpExpiry = new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000);
+    await session.save();
+
+    console.log(`🔑 OTP regenerated for session ${session.className}: ${newOtp}`);
+    res.json({ otp: newOtp, otpExpiry: session.otpExpiry });
+  } catch (error) {
+    console.error('Regenerate OTP error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ========= OTP-BASED ATTENDANCE MARKING (3-LAYER CHECK) =========
+app.post('/api/attendance/mark-with-otp', requireAuth, async (req, res) => {
+  try {
+    const { sessionId, studentUid, otp, avgLat, avgLon, accuracy, samplesUsed, deviceFingerprint, isLate } = req.body;
+    const BUILDING_RADIUS_METERS = 50;
+
+    // Layer 0a: Role check — only students
+    if (req.user.role !== 'student') {
+      return res.status(403).json({ error: 'Only students can mark attendance' });
+    }
+
+    // Layer 0b: Identity check — cannot mark for someone else
+    if (req.user.uid !== studentUid) {
+      return res.status(403).json({ error: 'Cannot mark attendance for another student' });
+    }
+
+    // Layer 0c: Session check
+    const session = await Session.findOne({ id: sessionId });
+    if (!session || session.status !== 'active') {
+      return res.status(404).json({ error: 'Session not found or no longer active' });
+    }
+
+    // ── Layer 1: GPS Building Boundary Check ──
+    if (avgLat != null && avgLon != null && session.buildingLat != null && session.buildingLon != null) {
+      const distanceFromBuilding = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
+      const radius = session.buildingRadius || BUILDING_RADIUS_METERS;
+      if (distanceFromBuilding > radius) {
+        console.log(`🚫 GPS REJECTED: ${req.user.email} is ${Math.round(distanceFromBuilding)}m away (limit: ${radius}m)`);
+        return res.status(403).json({
+          error: `You are ${Math.round(distanceFromBuilding)}m away from the classroom building. You must be inside the building to mark attendance.`
+        });
+      }
+    }
+
+    // ── Layer 2: OTP Check ──
+    if (!session.otp) {
+      return res.status(400).json({ error: 'No OTP generated for this session' });
+    }
+    if (String(otp) !== String(session.otp)) {
+      console.log(`❌ OTP MISMATCH for ${req.user.email}: entered ${otp}, expected ${session.otp}`);
+      return res.status(403).json({ error: 'Incorrect OTP. Ask your teacher for the correct code.' });
+    }
+    if (new Date() > new Date(session.otpExpiry)) {
+      console.log(`⏰ OTP EXPIRED for ${req.user.email}`);
+      return res.status(403).json({ error: 'OTP has expired. Ask your teacher to regenerate.' });
+    }
+
+    // ── Layer 3: Device Fingerprint Check ──
+    if (deviceFingerprint) {
+      const student = await User.findOne({ uid: studentUid });
+      if (student) {
+        if (!student.deviceFingerprint) {
+          // Check if ANY other student already bound this device
+          const deviceOwner = await User.findOne({ deviceFingerprint, role: 'student' });
+          if (deviceOwner && deviceOwner.uid !== studentUid) {
+            console.warn(`🚨 DEVICE CONFLICT: Device ${deviceFingerprint.substring(0, 16)} belongs to ${deviceOwner.name}, attempted by ${student.name}`);
+            return res.status(403).json({ error: 'This device is already registered to another student.' });
+          }
+          // First time — bind device
+          student.deviceFingerprint = deviceFingerprint;
+          await student.save();
+          console.log(`🔒 Device bound to ${student.name}: ${deviceFingerprint.substring(0, 16)}...`);
+        } else if (student.deviceFingerprint !== deviceFingerprint) {
+          console.warn(`⚠️ DEVICE MISMATCH for ${student.name}: expected ${student.deviceFingerprint.substring(0, 16)}, got ${deviceFingerprint.substring(0, 16)}`);
+          return res.status(403).json({ error: 'Wrong device. Use your registered phone.' });
+        }
+      }
+    }
+
+    // ── Late Check ──
+    const elapsed = (Date.now() - new Date(session.startTime).getTime()) / 60000;
+    const attendanceStatus = elapsed > 10 ? 'Late Entry' : 'Present';
+
+    // ── Save Attendance Record ──
+    let record = await Attendance.findOne({ sessionId, studentUid });
+    if (!record) {
+      const student = await User.findOne({ uid: studentUid });
+      if (!student) return res.status(404).json({ error: 'Student not found' });
+
+      record = new Attendance({
+        sessionId,
+        studentUid,
+        studentName: student.name,
+        roll: student.rollNumber || '',
+        status: 'Absent',
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        subject: session.className
+      });
+    }
+
+    record.status = attendanceStatus;
+    record.markedAt = new Date().toISOString();
+    if (avgLat != null && avgLon != null && session.buildingLat != null) {
+      const dist = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
+      record.distance = `${Math.round(dist)}m from building`;
+    } else {
+      record.distance = accuracy != null ? `Acc: ±${Math.round(accuracy)}m` : 'OTP verified';
+    }
+    record.reverifications = (record.reverifications || 0) + 1;
+    record.missedReverifications = 0;
+    await record.save();
+
+    // Console log
+    const distLog = avgLat != null && session.buildingLat != null
+      ? `${Math.round(getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon))}m from building`
+      : 'N/A';
+    console.log(`✅ OTP ATTENDANCE: ${record.studentName} → ${attendanceStatus} | Distance: ${distLog} | OTP: valid`);
+
+    res.json(record);
+  } catch (error) {
+    console.error('Mark-with-OTP error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
   try {
     const { sessionId, studentUid, avgLat, avgLon } = req.body;
@@ -1254,7 +1411,16 @@ app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
     const session = await Session.findOne({ id: sessionId });
     if (!session) return res.status(404).json({ error: 'Session not found' });
 
-    const isInsideGeofence = avgLat != null && avgLon != null && isInsidePolygon(avgLat, avgLon, session);
+    const isInsidePolygonCheck = avgLat != null && avgLon != null && isInsidePolygon(avgLat, avgLon, session);
+    
+    // Also check building boundary (50m radius)
+    let isInsideBuildingBoundary = false;
+    if (avgLat != null && avgLon != null && session.buildingLat != null && session.buildingLon != null) {
+      const distFromBuilding = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
+      isInsideBuildingBoundary = distFromBuilding <= (session.buildingRadius || 50);
+    }
+
+    const isInsideGeofence = isInsidePolygonCheck || isInsideBuildingBoundary;
 
     if (isInsideGeofence) {
       record.reverifications = (record.reverifications || 0) + 1;

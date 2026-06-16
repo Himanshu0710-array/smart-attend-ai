@@ -34,6 +34,6 @@ const sessionSchema = new mongoose.Schema({
   endTime: { type: String },
   status: { type: String, required: true, enum: ['active', 'ended'], default: 'active' },
   reverifyInterval: { type: Number, default: 20 },
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 export const Session = mongoose.model('Session', sessionSchema);

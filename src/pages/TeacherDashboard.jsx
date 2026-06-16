@@ -129,6 +129,12 @@ export default function TeacherDashboard() {
   const [locationError, setLocationError] = useState('');
   const [reverifyInterval, setReverifyInterval] = useState(20);
 
+  // OTP State
+  const [otpValue, setOtpValue] = useState('');
+  const [otpExpiry, setOtpExpiry] = useState(null);
+  const [otpCountdown, setOtpCountdown] = useState(0);
+  const [isRegeneratingOtp, setIsRegeneratingOtp] = useState(false);
+
   // Auto-end session on tab close/refresh
   useEffect(() => {
     if (!activeSession) return;
@@ -253,9 +259,16 @@ export default function TeacherDashboard() {
         const mySession = sessions.find(s => s.teacher === teacherName);
         if (mySession) {
           setActiveSession(mySession);
+          // Sync OTP from session data
+          if (mySession.otp && !otpValue) {
+            setOtpValue(mySession.otp);
+            setOtpExpiry(new Date(mySession.otpExpiry));
+          }
         } else {
           setActiveSession(null);
           setStudentList([]);
+          setOtpValue('');
+          setOtpExpiry(null);
         }
       } catch (e) { console.error(e); }
     };
@@ -263,6 +276,33 @@ export default function TeacherDashboard() {
     const interval = setInterval(check, 3000);
     return () => clearInterval(interval);
   }, [activeTab, teacherName]);
+
+  // OTP Countdown Timer
+  useEffect(() => {
+    if (!otpExpiry) { setOtpCountdown(0); return; }
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor((new Date(otpExpiry).getTime() - Date.now()) / 1000));
+      setOtpCountdown(remaining);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [otpExpiry]);
+
+  // OTP Regeneration Handler
+  const handleRegenerateOtp = async () => {
+    if (!activeSession) return;
+    setIsRegeneratingOtp(true);
+    try {
+      const result = await api.regenerateOtp(activeSession.id);
+      setOtpValue(result.otp);
+      setOtpExpiry(new Date(result.otpExpiry));
+      toast.success('OTP regenerated successfully!');
+    } catch (e) {
+      toast.error(e.error || 'Failed to regenerate OTP');
+    }
+    setIsRegeneratingOtp(false);
+  };
 
   // Poll attendance records for the active session
   const fetchRecords = useCallback(async () => {
@@ -460,6 +500,11 @@ export default function TeacherDashboard() {
         reverifyInterval
       );
       setActiveSession(session);
+      // Set initial OTP from newly created session
+      if (session.otp) {
+        setOtpValue(session.otp);
+        setOtpExpiry(new Date(session.otpExpiry));
+      }
     } catch (e) {
       console.error(e);
       setLocationError(e.error || 'Failed to start session on the server.');
@@ -932,6 +977,50 @@ export default function TeacherDashboard() {
                     : `(Lat: ${activeSession.lat?.toFixed(4)}, Lon: ${activeSession.lon?.toFixed(4)})`}
                 </span>
                 <span className="ml-auto text-xs text-emerald-600/60">Auto-refreshing every 3s</span>
+              </div>
+            )}
+
+            {/* ── OTP Display Panel ── */}
+            {activeSession && otpValue && (
+              <div className="mt-4 p-5 bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-2xl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-300 mb-1 flex items-center gap-1.5">
+                      🔑 Session OTP — Read aloud to class
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex gap-2">
+                        {String(otpValue).split('').map((digit, i) => (
+                          <span key={i} className="w-14 h-16 flex items-center justify-center text-3xl font-bold text-indigo-900 dark:text-indigo-100 bg-white dark:bg-slate-800 border-2 border-indigo-300 dark:border-indigo-700 rounded-xl shadow-sm">
+                            {digit}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className={`text-sm font-bold px-3 py-1.5 rounded-lg ${
+                      otpCountdown === 0
+                        ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                        : otpCountdown <= 30
+                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                          : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                    }`}>
+                      {otpCountdown === 0 ? '⏰ OTP Expired' : `⏱️ ${otpCountdown}s remaining`}
+                    </div>
+                    <button
+                      onClick={handleRegenerateOtp}
+                      disabled={isRegeneratingOtp}
+                      className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white text-sm font-medium rounded-xl shadow-sm hover:shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isRegeneratingOtp ? 'animate-spin' : ''}`} />
+                      Regenerate OTP
+                    </button>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      ✅ {present + late} students marked present
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>

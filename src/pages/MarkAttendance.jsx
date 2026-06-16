@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
-import { MapPin, CheckCircle, XCircle, Loader2, Wifi, RefreshCw, ShieldCheck, CalendarDays } from 'lucide-react';
+import { MapPin, CheckCircle, XCircle, Loader2, Wifi, RefreshCw, ShieldCheck, CalendarDays, KeyRound } from 'lucide-react';
 
 // Ray-casting algorithm removed due to unreliability with bowtie polygons
 
@@ -74,6 +74,13 @@ async function getDeviceFingerprint() {
   }
 }
 
+// GPS and OTP tunable constants
+const MIN_SAMPLES = 5;
+const MAX_SAMPLES = 15;
+const ACCURACY_TARGET = 30;
+const ACCURACY_CUTOFF = 60;
+const DELAY_MS = 2000;
+
 export default function MarkAttendance() {
   const { userData } = useAuth();
   const studentUid = userData?.uid || 'demo-student-001';
@@ -92,11 +99,11 @@ export default function MarkAttendance() {
   const [myStatus, setMyStatus] = useState(null);
   const [progressMsg, setProgressMsg] = useState('');
 
-  const MIN_SAMPLES = 5;
-  const MAX_SAMPLES = 15;
-  const ACCURACY_TARGET = 30;
-  const ACCURACY_CUTOFF = 80;
-  const DELAY_MS = 2000;
+  // OTP State
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '']);
+  const [otpError, setOtpError] = useState('');
+  const [successSubject, setSuccessSubject] = useState('');
+  const otpRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
 
   // Fetch live sessions
   useEffect(() => {
@@ -134,35 +141,50 @@ export default function MarkAttendance() {
     return () => clearInterval(interval);
   }, [selectedSession, studentUid]);
 
-  const checkLocation = useCallback(async () => {
-    if (!selectedSession) return;
-    setLoading(true);
-    setLocationError('');
-    setDeviceError('');
-    setProgressMsg('Initializing GPS...');
+  // OTP digit input handler
+  const handleOtpChange = (index, value) => {
+    if (!/^\d*$/.test(value)) return; // Only allow digits
+    const newDigits = [...otpDigits];
+    newDigits[index] = value.slice(-1); // Only keep last digit
+    setOtpDigits(newDigits);
+    setOtpError('');
 
-    // Proactively check device fingerprint first
-    try {
-      const fp = await getDeviceFingerprint();
-      const res = await api.verifyDeviceFingerprint(fp, studentUid);
-      if (!res.valid) {
-        setDeviceError(res.message);
-        setCheckResult('device_error');
-        setLoading(false);
-        return; 
-      }
-    } catch (e) {
-      console.warn('Could not verify device fingerprint', e);
-      // Fail open on network error — server will re-check on markAttendance
+    // Auto-advance to next box
+    if (value && index < 3) {
+      otpRefs[index + 1].current?.focus();
     }
 
+    // Auto-submit when all 4 digits entered
+    if (value && index === 3 && newDigits.every(d => d !== '')) {
+      handleSubmitWithOtp(newDigits.join(''));
+    }
+  };
+
+  // Handle backspace to go to previous box
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      otpRefs[index - 1].current?.focus();
+    }
+  };
+
+  // Handle paste — fill all 4 boxes from pasted text
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    if (pasted.length === 4) {
+      const newDigits = pasted.split('');
+      setOtpDigits(newDigits);
+      otpRefs[3].current?.focus();
+      handleSubmitWithOtp(pasted);
+    }
+  };
+
+  // Adaptive GPS sampling function
+  const getAveragedLocation = async () => {
     if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser');
-      setLoading(false);
-      return;
+      throw new Error('Geolocation is not supported by your browser');
     }
 
-    // Adaptive multi-sampling loop
     let samples = [];
     const getPos = () => new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
@@ -173,7 +195,7 @@ export default function MarkAttendance() {
         const pos = await getPos();
         samples.push(pos.coords);
         const bestAcc = Math.min(...samples.map(s => s.accuracy));
-        setProgressMsg(`Getting location... sample ${i}/${MAX_SAMPLES} (current accuracy: ±${Math.round(pos.coords.accuracy)}m)`);
+        setProgressMsg(`Getting location... sample ${i}/${MAX_SAMPLES} (±${Math.round(pos.coords.accuracy)}m accuracy)`);
         
         if (i >= MIN_SAMPLES && bestAcc <= ACCURACY_TARGET) {
           break; // Stop early if achieved target after min samples
@@ -189,48 +211,116 @@ export default function MarkAttendance() {
     }
 
     if (samples.length === 0) {
-      setLocationError('Unable to get your location. Please check permissions and try again.');
-      setLoading(false);
-      return;
+      throw new Error('Unable to get your location. Please check permissions and try again.');
     }
 
     const bestAccuracy = Math.min(...samples.map(s => s.accuracy));
     if (bestAccuracy > ACCURACY_CUTOFF) {
-      setLocationError(`GPS accuracy is too low (±${Math.round(bestAccuracy)}m). Please move near a window or go outside and try again.`);
-      setLoading(false);
+      throw new Error(`GPS signal too weak (±${Math.round(bestAccuracy)}m). Move near a window and try again.`);
+    }
+
+    const latitude = samples.reduce((sum, s) => sum + s.latitude, 0) / samples.length;
+    const longitude = samples.reduce((sum, s) => sum + s.longitude, 0) / samples.length;
+
+    return { latitude, longitude, accuracy: bestAccuracy, samplesUsed: samples.length };
+  };
+
+  // Submit attendance with OTP (main flow)
+  const handleSubmitWithOtp = useCallback(async (otpString) => {
+    if (!selectedSession) return;
+    
+    const enteredOTP = otpString || otpDigits.join('');
+    if (enteredOTP.length !== 4) {
+      setOtpError('Please enter all 4 digits');
       return;
     }
 
-    const avgLat = samples.reduce((sum, s) => sum + s.latitude, 0) / samples.length;
-    const avgLon = samples.reduce((sum, s) => sum + s.longitude, 0) / samples.length;
-    
-    setLocation({ latitude: avgLat, longitude: avgLon, accuracy: bestAccuracy });
-    setLastChecked(new Date());
-    setDistance(null);
-    setAllowedDistance(null);
+    setLoading(true);
+    setLocationError('');
+    setDeviceError('');
+    setOtpError('');
+    setProgressMsg('Initializing GPS...');
 
     try {
-      if (myStatus === 'Absent' || !myStatus) {
-        const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
-        const fp = await getDeviceFingerprint();
-        await api.markAttendance(selectedSession.id, studentUid, avgLat, avgLon, bestAccuracy, samples.length, elapsed > 10, fp);
+      // Step 1: Get averaged GPS location
+      const { latitude, longitude, accuracy, samplesUsed } = await getAveragedLocation();
+      setLocation({ latitude, longitude, accuracy });
+      setLastChecked(new Date());
+
+      // Step 2: Get device fingerprint
+      const fp = await getDeviceFingerprint();
+
+      // Step 3: Calculate late status
+      const elapsed = (Date.now() - new Date(selectedSession.startTime).getTime()) / 60000;
+      const isLate = elapsed > 10;
+
+      setProgressMsg('Verifying attendance...');
+
+      // Step 4: Call mark-with-otp API
+      const record = await api.markAttendanceWithOtp(
+        selectedSession.id,
+        studentUid,
+        enteredOTP,
+        latitude,
+        longitude,
+        accuracy,
+        samplesUsed,
+        fp,
+        isLate
+      );
+
+      // Success!
+      setCheckResult('inside');
+      setMyStatus(record.status);
+      setSuccessSubject(selectedSession.className);
+      setOtpDigits(['', '', '', '']);
+
+    } catch (e) {
+      const errorMsg = e.error || e.message || 'Failed to mark attendance';
+
+      // Categorize errors for appropriate UI feedback
+      if (errorMsg.includes('away from the classroom building') || errorMsg.includes('inside the building')) {
+        setCheckResult('building_error');
+        setLocationError(errorMsg);
+      } else if (errorMsg.includes('OTP') || errorMsg.includes('Incorrect') || errorMsg.includes('expired') || errorMsg.includes('code')) {
+        setCheckResult('otp_error');
+        setOtpError(errorMsg);
+      } else if (errorMsg.includes('device') || errorMsg.includes('Device') || errorMsg.includes('registered') || errorMsg.includes('phone')) {
+        setCheckResult('device_error');
+        setDeviceError(errorMsg);
+      } else if (errorMsg.includes('GPS') || errorMsg.includes('location') || errorMsg.includes('Geolocation')) {
+        setCheckResult(null);
+        setLocationError(errorMsg);
       } else {
-        await api.reverifyAttendance(selectedSession.id, studentUid, avgLat, avgLon);
+        setCheckResult('device_error');
+        setDeviceError(errorMsg);
       }
+    }
+    setLoading(false);
+  }, [selectedSession, studentUid, otpDigits]);
+
+  // Re-verify location (for already-marked students)
+  const handleReverify = useCallback(async () => {
+    if (!selectedSession) return;
+    setLoading(true);
+    setLocationError('');
+    setProgressMsg('Re-verifying location...');
+
+    try {
+      const { latitude, longitude, accuracy } = await getAveragedLocation();
+      setLocation({ latitude, longitude, accuracy });
+      setLastChecked(new Date());
+
+      await api.reverifyAttendance(selectedSession.id, studentUid, latitude, longitude);
       const records = await api.getSessionRecords(selectedSession.id);
       setMyStatus(records[studentUid]?.status || 'Absent');
       setCheckResult('inside');
     } catch (e) {
-      if (e.error && (e.error.includes('outside') || e.error.includes('Location verification failed'))) {
-        setCheckResult('outside');
-      } else {
-        console.error('Failed to update attendance:', e);
-        setDeviceError(e.error || 'Failed to communicate with server.');
-        setCheckResult('device_error');
-      }
+      console.error('Reverification failed:', e);
+      setLocationError(e.error || e.message || 'Reverification failed');
     }
     setLoading(false);
-  }, [selectedSession, studentUid, myStatus]);
+  }, [selectedSession, studentUid]);
 
   // Reverification timer (every X minutes)
   useEffect(() => {
@@ -239,11 +329,11 @@ export default function MarkAttendance() {
       setNextReverify(new Date(Date.now() + REVERIFY_INTERVAL));
       const timer = setInterval(() => {
         setNextReverify(new Date(Date.now() + REVERIFY_INTERVAL));
-        checkLocation();
+        handleReverify();
       }, REVERIFY_INTERVAL);
       return () => clearInterval(timer);
     }
-  }, [checkResult, selectedSession, checkLocation]);
+  }, [checkResult, selectedSession, handleReverify]);
 
   if (liveSessions.length === 0) {
     return (
@@ -263,11 +353,13 @@ export default function MarkAttendance() {
     );
   }
 
+  const isAlreadyMarked = myStatus === 'Present' || myStatus === 'Late Entry';
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white">Mark Attendance</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">Verify your location to mark attendance</p>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">Enter OTP and verify your location</p>
       </div>
 
       {liveSessions.length > 1 && (
@@ -275,7 +367,7 @@ export default function MarkAttendance() {
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Select Session</label>
           <select
             value={selectedSession?.id || ''}
-            onChange={(e) => { setSelectedSession(liveSessions.find(s => s.id === e.target.value)); setCheckResult(null); setLocation(null); }}
+            onChange={(e) => { setSelectedSession(liveSessions.find(s => s.id === e.target.value)); setCheckResult(null); setLocation(null); setOtpDigits(['', '', '', '']); }}
             className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
           >
             {liveSessions.map((s) => <option key={s.id} value={s.id}>{s.className} — {s.room} ({s.teacher})</option>)}
@@ -290,37 +382,70 @@ export default function MarkAttendance() {
               <MapPin className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="font-semibold text-slate-900 dark:text-white">{selectedSession.className} — {selectedSession.room}</h2>
+              <h2 className="font-semibold text-slate-900 dark:text-white">{selectedSession.className}</h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {selectedSession.teacher} •{' '}
-                {selectedSession.lat_min != null ? '📐 Classroom boundary active' : `Radius: ${selectedSession.radius}m`}
+                {selectedSession.teacher} • {selectedSession.room}
               </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-              <p className="text-slate-500 dark:text-slate-400">Lat</p>
-              <p className="font-medium text-slate-900 dark:text-white">{selectedSession.lat}°</p>
-            </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl">
-              <p className="text-slate-500 dark:text-slate-400">Lon</p>
-              <p className="font-medium text-slate-900 dark:text-white">{selectedSession.lon}°</p>
             </div>
           </div>
         </div>
       )}
 
-      {!checkResult && !loading && (
-        <button onClick={checkLocation} className="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold text-lg rounded-2xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all flex items-center justify-center gap-3">
-          <MapPin className="w-6 h-6" />
-          Verify My Location
-        </button>
+      {/* OTP Input UI — shown when session active and not yet marked */}
+      {selectedSession && !isAlreadyMarked && !loading && checkResult !== 'inside' && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600">
+              <KeyRound className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">Enter OTP</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Ask your teacher for the 4-digit code</p>
+            </div>
+          </div>
+
+          {/* 4 digit OTP input boxes */}
+          <div className="flex justify-center gap-3 mb-4">
+            {otpDigits.map((digit, i) => (
+              <input
+                key={i}
+                ref={otpRefs[i]}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleOtpChange(i, e.target.value)}
+                onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                onPaste={i === 0 ? handleOtpPaste : undefined}
+                className={`w-16 h-20 text-center text-3xl font-bold border-2 rounded-2xl outline-none transition-all
+                  ${otpError 
+                    ? 'border-red-400 dark:border-red-600 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10' 
+                    : 'border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30'
+                  }`}
+                autoFocus={i === 0}
+              />
+            ))}
+          </div>
+
+          {otpError && (
+            <p className="text-center text-sm text-red-600 dark:text-red-400 mb-3 font-medium">❌ {otpError}</p>
+          )}
+
+          <button
+            onClick={() => handleSubmitWithOtp()}
+            disabled={otpDigits.some(d => d === '')}
+            className="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold text-lg rounded-2xl shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <MapPin className="w-6 h-6" />
+            Mark Attendance
+          </button>
+        </div>
       )}
 
       {loading && (
         <div className="text-center py-8 animate-pulse">
           <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 dark:text-slate-400 font-medium">{progressMsg || 'Acquiring precise GPS lock...'}</p>
+          <p className="text-slate-600 dark:text-slate-400 font-medium">{progressMsg || 'Processing...'}</p>
           <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">Allowing satellite signal to settle</p>
         </div>
       )}
@@ -328,25 +453,24 @@ export default function MarkAttendance() {
       {locationError && !checkResult && (
         <div className="p-5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center">
           <XCircle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-          <p className="font-medium text-red-700 dark:text-red-300">{locationError}</p>
-          <button onClick={checkLocation} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors">Try Again</button>
+          <p className="font-medium text-red-700 dark:text-red-300">📡 {locationError}</p>
+          <button onClick={() => { setCheckResult(null); setLocationError(''); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors">Try Again</button>
         </div>
       )}
 
+      {/* Success: Attendance Marked */}
       {checkResult === 'inside' && (
         <div className="p-6 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl text-center">
           <div className="inline-flex p-3 rounded-full bg-emerald-100 dark:bg-emerald-900/40 mb-4">
             <CheckCircle className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <h3 className="text-xl font-bold text-emerald-800 dark:text-emerald-200 mb-1">Attendance Marked — {myStatus}!</h3>
+          <h3 className="text-xl font-bold text-emerald-800 dark:text-emerald-200 mb-1">✅ {myStatus} — {successSubject || selectedSession?.className}</h3>
           <p className="text-emerald-600 dark:text-emerald-400 text-sm">
-            {distance !== null
-              ? `You are ${distance}m from the classroom (within ${allowedDistance}m)`
-              : '✅ You are inside the classroom'}
+            Your attendance has been marked successfully
           </p>
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-emerald-600/80 dark:text-emerald-400/80">
             <ShieldCheck className="w-4 h-4" />
-            <span>GPS verified at {lastChecked?.toLocaleTimeString()}</span>
+            <span>Verified at {lastChecked?.toLocaleTimeString()}</span>
           </div>
           {nextReverify && (
             <div className="mt-3 flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -354,12 +478,55 @@ export default function MarkAttendance() {
               <span>Next reverification at {nextReverify.toLocaleTimeString()}</span>
             </div>
           )}
-          <button onClick={checkLocation} className="mt-4 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-lg text-sm font-medium hover:bg-emerald-200 transition-colors inline-flex items-center gap-1.5">
+          <button onClick={handleReverify} className="mt-4 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-lg text-sm font-medium hover:bg-emerald-200 transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Re-verify Now
           </button>
         </div>
       )}
 
+      {/* Error: Outside Building */}
+      {checkResult === 'building_error' && (
+        <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center">
+          <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
+            <XCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
+          </div>
+          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">🚫 You are not inside the building</h3>
+          <p className="text-red-600 dark:text-red-400 text-sm">{locationError}</p>
+          <button onClick={() => { setCheckResult(null); setLocationError(''); setOtpDigits(['', '', '', '']); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
+            <RefreshCw className="w-4 h-4" /> Try Again
+          </button>
+        </div>
+      )}
+
+      {/* Error: OTP Failed */}
+      {checkResult === 'otp_error' && (
+        <div className="p-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-2xl text-center">
+          <div className="inline-flex p-3 rounded-full bg-amber-100 dark:bg-amber-900/40 mb-4">
+            <KeyRound className="w-10 h-10 text-amber-600 dark:text-amber-400" />
+          </div>
+          <h3 className="text-xl font-bold text-amber-800 dark:text-amber-200 mb-1">❌ Wrong OTP</h3>
+          <p className="text-amber-600 dark:text-amber-400 text-sm font-medium">{otpError}</p>
+          <button onClick={() => { setCheckResult(null); setOtpError(''); setOtpDigits(['', '', '', '']); otpRefs[0].current?.focus(); }} className="mt-4 px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg text-sm font-medium hover:bg-amber-200 transition-colors inline-flex items-center gap-1.5">
+            <RefreshCw className="w-4 h-4" /> Try Again
+          </button>
+        </div>
+      )}
+
+      {/* Error: Device Mismatch */}
+      {checkResult === 'device_error' && (
+        <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center animate-in zoom-in-95">
+          <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
+            <ShieldCheck className="w-10 h-10 text-red-600 dark:text-red-400" />
+          </div>
+          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">⚠️ Wrong device detected</h3>
+          <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed max-w-md mx-auto">{deviceError}</p>
+          <button onClick={() => setCheckResult(null)} className="mt-6 px-6 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30">
+            Acknowledge
+          </button>
+        </div>
+      )}
+
+      {/* Error: Generic outside (legacy) */}
       {checkResult === 'outside' && (
         <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center">
           <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
@@ -371,21 +538,8 @@ export default function MarkAttendance() {
               ? `You are ${distance}m away (allowed: ${allowedDistance}m)`
               : '❌ Your GPS is outside the classroom boundaries'}
           </p>
-          <button onClick={() => { setCheckResult(null); checkLocation(); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
+          <button onClick={() => { setCheckResult(null); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Check Again
-          </button>
-        </div>
-      )}
-
-      {checkResult === 'device_error' && (
-        <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center animate-in zoom-in-95">
-          <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
-            <ShieldCheck className="w-10 h-10 text-red-600 dark:text-red-400" />
-          </div>
-          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">Proxy Detected / Device Mismatch</h3>
-          <p className="text-red-600 dark:text-red-400 text-sm font-medium leading-relaxed max-w-md mx-auto">{deviceError}</p>
-          <button onClick={() => setCheckResult(null)} className="mt-6 px-6 py-2.5 bg-red-600 text-white rounded-xl text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-500/30">
-            Acknowledge
           </button>
         </div>
       )}

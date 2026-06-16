@@ -79,8 +79,10 @@ export const endSession = (sessionId) => request(`/sessions/${sessionId}`, { met
 export const getAttendance = (sessionId) => request(`/attendance/${sessionId}`);
 export const getSessionRecords = (sessionId) => request(`/attendance/${sessionId}`);
 export const markAttendance = (sessionId, studentUid, avgLat, avgLon, accuracy, samplesUsed, isLate, deviceFingerprint) => request('/attendance/mark', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, avgLat, avgLon, accuracy, samplesUsed, isLate, deviceFingerprint }) });
+export const markAttendanceWithOtp = (sessionId, studentUid, otp, avgLat, avgLon, accuracy, samplesUsed, deviceFingerprint, isLate) => request('/attendance/mark-with-otp', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, otp, avgLat, avgLon, accuracy, samplesUsed, deviceFingerprint, isLate }) });
 export const reverifyAttendance = (sessionId, studentUid, avgLat, avgLon) => request('/attendance/reverify', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, avgLat, avgLon }) });
 export const overrideAttendance = (sessionId, studentUid, newStatus) => request('/attendance/override', { method: 'POST', body: JSON.stringify({ sessionId, studentUid, newStatus }) });
+export const regenerateOtp = (sessionId) => request(`/sessions/${sessionId}/regenerate-otp`, { method: 'POST' });
 
 // History & Reports
 export const getStudentHistory = (studentUid) => request(`/history/${studentUid}`);
