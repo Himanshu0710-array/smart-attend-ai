@@ -34,6 +34,13 @@ const sessionSchema = new mongoose.Schema({
   endTime: { type: String },
   status: { type: String, required: true, enum: ['active', 'ended'], default: 'active' },
   reverifyInterval: { type: Number, default: 20 },
-}, { timestamps: true, strict: false });
+
+  // OTP and Geofencing Layer 1 (Building)
+  otp: { type: String },
+  otpExpiry: { type: Date },
+  buildingLat: { type: Number },
+  buildingLon: { type: Number },
+  buildingRadius: { type: Number },
+}, { timestamps: true });
 
 export const Session = mongoose.model('Session', sessionSchema);
