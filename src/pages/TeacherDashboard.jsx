@@ -259,10 +259,15 @@ export default function TeacherDashboard() {
         const mySession = sessions.find(s => s.teacher === teacherName);
         if (mySession) {
           setActiveSession(mySession);
-          // Sync OTP from session data
-          if (mySession.otp && !otpValue) {
-            setOtpValue(mySession.otp);
-            setOtpExpiry(new Date(mySession.otpExpiry));
+          // Always sync OTP from server
+          if (mySession.otp) {
+            setOtpValue(mySession.otp); // React skips re-render if same string
+            // Only update expiry if the timestamp actually changed (avoids resetting countdown timer)
+            const serverExpiry = new Date(mySession.otpExpiry).getTime();
+            setOtpExpiry(prev => {
+              if (prev && prev.getTime() === serverExpiry) return prev; // same — keep old reference
+              return new Date(serverExpiry); // changed — update
+            });
           }
         } else {
           setActiveSession(null);
