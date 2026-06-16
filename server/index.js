@@ -41,6 +41,29 @@ function isInsidePolygon(lat, lon, polyData) {
   return inside;
 }
 
+function isWithinBufferedPolygon(lat, lon, polyData, bufferMeters = 30) {
+  // First check exactly
+  if (isInsidePolygon(lat, lon, polyData)) return true;
+
+  // Check 8 points around it at bufferMeters distance
+  const R = 6371e3; // Earth radius in meters
+  const latRad = lat * Math.PI / 180;
+  
+  for (let angle = 0; angle < 360; angle += 45) {
+    const bearing = angle * Math.PI / 180;
+    // Destination point formula
+    const lat2 = Math.asin(Math.sin(latRad)*Math.cos(bufferMeters/R) + 
+                           Math.cos(latRad)*Math.sin(bufferMeters/R)*Math.cos(bearing));
+    const lon2 = (lon * Math.PI / 180) + Math.atan2(Math.sin(bearing)*Math.sin(bufferMeters/R)*Math.cos(latRad),
+                                 Math.cos(bufferMeters/R)-Math.sin(latRad)*Math.sin(lat2));
+    
+    if (isInsidePolygon(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI, polyData)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 dotenv.config();
 
 const app = express();
@@ -1070,7 +1093,6 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
     const sessionId = `session-${Date.now()}`;
     const displayClassName = `${groupName} — ${subject.trim()}`;
 
-    const BUILDING_RADIUS_METERS = 50;
     const OTP_EXPIRY_SECONDS = 90;
 
     const generatedOtp = String(Math.floor(1000 + Math.random() * 9000)); // 4 digit OTP
@@ -1098,10 +1120,6 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
       // OTP fields
       otp: generatedOtp,
       otpExpiry: new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000),
-      // Building boundary fields (teacher's location = building center)
-      buildingLat: fallbackLat,
-      buildingLon: fallbackLon,
-      buildingRadius: BUILDING_RADIUS_METERS,
     });
     await newSession.save();
 
@@ -1288,8 +1306,6 @@ app.post('/api/sessions/:sessionId/regenerate-otp', requireAuth, async (req, res
 app.post('/api/attendance/mark-with-otp', requireAuth, async (req, res) => {
   try {
     const { sessionId, studentUid, otp, avgLat, avgLon, accuracy, samplesUsed, deviceFingerprint, isLate } = req.body;
-    const BUILDING_RADIUS_METERS = 50;
-
     // Layer 0a: Role check — only students
     if (req.user.role !== 'student') {
       return res.status(403).json({ error: 'Only students can mark attendance' });
@@ -1306,14 +1322,14 @@ app.post('/api/attendance/mark-with-otp', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Session not found or no longer active' });
     }
 
-    // ── Layer 1: GPS Building Boundary Check ──
-    if (avgLat != null && avgLon != null && session.buildingLat != null && session.buildingLon != null) {
-      const distanceFromBuilding = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
-      const radius = session.buildingRadius || BUILDING_RADIUS_METERS;
-      if (distanceFromBuilding > radius) {
-        console.log(`🚫 GPS REJECTED: ${req.user.email} is ${Math.round(distanceFromBuilding)}m away (limit: ${radius}m)`);
+    // ── Layer 1: Buffered Classroom Polygon Check ──
+    const LOCATION_BUFFER_METERS = 30; // 30m buffer around classroom
+    if (avgLat != null && avgLon != null) {
+      const isInside = isWithinBufferedPolygon(avgLat, avgLon, session, LOCATION_BUFFER_METERS);
+      if (!isInside) {
+        console.log(`🚫 GPS REJECTED: ${req.user.email} is outside the classroom buffer zone.`);
         return res.status(403).json({
-          error: `You are ${Math.round(distanceFromBuilding)}m away from the classroom building. You must be inside the building to mark attendance.`
+          error: `Location verification failed. You must be inside or very close to the classroom to mark attendance.`
         });
       }
     }
@@ -1376,9 +1392,8 @@ app.post('/api/attendance/mark-with-otp', requireAuth, async (req, res) => {
 
     record.status = attendanceStatus;
     record.markedAt = new Date().toISOString();
-    if (avgLat != null && avgLon != null && session.buildingLat != null) {
-      const dist = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
-      record.distance = `${Math.round(dist)}m from building`;
+    if (avgLat != null && avgLon != null) {
+      record.distance = `Inside/Near Classroom`;
     } else {
       record.distance = accuracy != null ? `Acc: ±${Math.round(accuracy)}m` : 'OTP verified';
     }
@@ -1387,9 +1402,7 @@ app.post('/api/attendance/mark-with-otp', requireAuth, async (req, res) => {
     await record.save();
 
     // Console log
-    const distLog = avgLat != null && session.buildingLat != null
-      ? `${Math.round(getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon))}m from building`
-      : 'N/A';
+    const distLog = avgLat != null ? `Inside/Near Classroom` : 'N/A';
     console.log(`✅ OTP ATTENDANCE: ${record.studentName} → ${attendanceStatus} | Distance: ${distLog} | OTP: valid`);
 
     res.json(record);
@@ -1411,16 +1424,8 @@ app.post('/api/attendance/reverify', requireAuth, async (req, res) => {
     const session = await Session.findOne({ id: sessionId });
     if (!session) return res.status(404).json({ error: 'Session not found' });
 
-    const isInsidePolygonCheck = avgLat != null && avgLon != null && isInsidePolygon(avgLat, avgLon, session);
-    
-    // Also check building boundary (50m radius)
-    let isInsideBuildingBoundary = false;
-    if (avgLat != null && avgLon != null && session.buildingLat != null && session.buildingLon != null) {
-      const distFromBuilding = getDistanceMeters(avgLat, avgLon, session.buildingLat, session.buildingLon);
-      isInsideBuildingBoundary = distFromBuilding <= (session.buildingRadius || 50);
-    }
-
-    const isInsideGeofence = isInsidePolygonCheck || isInsideBuildingBoundary;
+    const LOCATION_BUFFER_METERS = 30; // 30m buffer around classroom
+    const isInsideGeofence = avgLat != null && avgLon != null && isWithinBufferedPolygon(avgLat, avgLon, session, LOCATION_BUFFER_METERS);
 
     if (isInsideGeofence) {
       record.reverifications = (record.reverifications || 0) + 1;
