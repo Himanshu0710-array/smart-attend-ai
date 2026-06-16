@@ -42,25 +42,17 @@ function isInsidePolygon(lat, lon, polyData) {
 }
 
 function isWithinBufferedPolygon(lat, lon, polyData, bufferMeters = 30) {
-  // First check exactly
+  // First check exact ray-casting
   if (isInsidePolygon(lat, lon, polyData)) return true;
 
-  // Check 8 points around it at bufferMeters distance
-  const R = 6371e3; // Earth radius in meters
-  const latRad = lat * Math.PI / 180;
-  
-  for (let angle = 0; angle < 360; angle += 45) {
-    const bearing = angle * Math.PI / 180;
-    // Destination point formula
-    const lat2 = Math.asin(Math.sin(latRad)*Math.cos(bufferMeters/R) + 
-                           Math.cos(latRad)*Math.sin(bufferMeters/R)*Math.cos(bearing));
-    const lon2 = (lon * Math.PI / 180) + Math.atan2(Math.sin(bearing)*Math.sin(bufferMeters/R)*Math.cos(latRad),
-                                 Math.cos(bufferMeters/R)-Math.sin(latRad)*Math.sin(lat2));
-    
-    if (isInsidePolygon(lat2 * 180 / Math.PI, lon2 * 180 / Math.PI, polyData)) {
-      return true;
-    }
+  // If outside, check if we are within the buffer distance to ANY of the 4 corners
+  if (polyData.c1_lat != null) {
+    if (getDistanceMeters(lat, lon, polyData.c1_lat, polyData.c1_lon) <= bufferMeters) return true;
+    if (getDistanceMeters(lat, lon, polyData.c2_lat, polyData.c2_lon) <= bufferMeters) return true;
+    if (getDistanceMeters(lat, lon, polyData.c3_lat, polyData.c3_lon) <= bufferMeters) return true;
+    if (getDistanceMeters(lat, lon, polyData.c4_lat, polyData.c4_lon) <= bufferMeters) return true;
   }
+  
   return false;
 }
 

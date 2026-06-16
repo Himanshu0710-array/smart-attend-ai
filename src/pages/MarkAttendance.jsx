@@ -278,18 +278,20 @@ export default function MarkAttendance() {
     } catch (e) {
       const errorMsg = e.error || e.message || 'Failed to mark attendance';
 
+      const lowerError = errorMsg.toLowerCase();
+
       // Categorize errors for appropriate UI feedback
-      if (errorMsg.includes('away from the classroom building') || errorMsg.includes('inside the building')) {
+      if (lowerError.includes('classroom buffer') || lowerError.includes('inside or very close to the classroom') || lowerError.includes('classroom building') || lowerError.includes('inside the building')) {
         setCheckResult('building_error');
         setLocationError(errorMsg);
-      } else if (errorMsg.includes('OTP') || errorMsg.includes('Incorrect') || errorMsg.includes('expired') || errorMsg.includes('code')) {
+      } else if (lowerError.includes('otp') || lowerError.includes('incorrect') || lowerError.includes('expired') || lowerError.includes('code')) {
         setCheckResult('otp_error');
         setOtpError(errorMsg);
-      } else if (errorMsg.includes('device') || errorMsg.includes('Device') || errorMsg.includes('registered') || errorMsg.includes('phone')) {
+      } else if (lowerError.includes('device') || lowerError.includes('registered') || lowerError.includes('phone')) {
         setCheckResult('device_error');
         setDeviceError(errorMsg);
-      } else if (errorMsg.includes('GPS') || errorMsg.includes('location') || errorMsg.includes('Geolocation')) {
-        setCheckResult(null);
+      } else if (lowerError.includes('gps') || lowerError.includes('location') || lowerError.includes('geolocation') || lowerError.includes('verification failed')) {
+        setCheckResult('building_error'); // Use building_error state for all location rejections to show the map UI
         setLocationError(errorMsg);
       } else {
         setCheckResult('device_error');
@@ -484,13 +486,13 @@ export default function MarkAttendance() {
         </div>
       )}
 
-      {/* Error: Outside Building */}
+      {/* Error: Outside Classroom */}
       {checkResult === 'building_error' && (
         <div className="p-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl text-center">
           <div className="inline-flex p-3 rounded-full bg-red-100 dark:bg-red-900/40 mb-4">
             <XCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
           </div>
-          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">🚫 You are not inside the building</h3>
+          <h3 className="text-xl font-bold text-red-800 dark:text-red-200 mb-1">🚫 Location check failed</h3>
           <p className="text-red-600 dark:text-red-400 text-sm">{locationError}</p>
           <button onClick={() => { setCheckResult(null); setLocationError(''); setOtpDigits(['', '', '', '']); }} className="mt-4 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors inline-flex items-center gap-1.5">
             <RefreshCw className="w-4 h-4" /> Try Again
